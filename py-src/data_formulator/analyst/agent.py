@@ -35,6 +35,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Generator
@@ -173,13 +174,7 @@ class _StreamingArgExtractor:
 # always-loaded ``core`` skill's SKILL.md (the concrete tools + action schemas)
 # is appended after this frame, unformatted, exactly like any other skill body.
 SYSTEM_PROMPT = """\
-You are an autonomous data analyst agent.
-
-Your goal is to help the user by exploring their data, producing visualizations,
-and — when asked — packaging the findings (e.g. into a written report). You
-operate in a loop: gather what you need with inspection tools, take an **action**
-when you want to act on the data, read its result, and repeat — then stop by
-giving your final answer in plain text.
+{agent_identity}
 
 ## Tools vs. actions
 
@@ -254,53 +249,127 @@ execute — you'll be asked to load it first. Extension skills available this ru
   ceiling, not a target**. Use as few as the goal requires.
 - **Stop as soon as the user's goal is met.** End the run by giving your final
   answer in plain text rather than taking more actions just because you can.
-- For concrete/progressive questions, take a follow-up action only when it
-  addresses a gap the previous step actually raised. For open-ended
-  exploration, the opposite applies: deliberately spend your budget covering
-  distinct analytical angles (see the core skill's "Choosing what to do").
-- If the request is genuinely ambiguous, ask the user in plain text (no action)
-  rather than guessing.
+{budget_calibration}
 
 {agent_exploration_rules}"""
 
 
 # ---------------------------------------------------------------------------
-# User-study behavioral presets (Executor vs. Analyst)
+# Per-mode prompt profiles (user study: Default / Executor / Analyst)
 # ---------------------------------------------------------------------------
 #
-# The study variant runs the standard AnalystAgent but selects one of two
-# behavioral profiles per request via the ``analysis_mode`` field (see
-# ``routes/agents.py``). Each profile is just an iteration budget plus a block of
-# text dropped into the existing ``{agent_exploration_rules}`` slot above — no new
-# agent class. The budget is the hard guarantee (executor commits at most a few
-# actions); the rules shape intent within that budget.
+# The system prompt is ~90% shared execution machinery (the core skill's tools,
+# visualize schema, chart-type reference). Only three small spans encode the
+# agent's *analytical policy* and differ between study modes: the identity
+# paragraph and budget-calibration bullets (the {agent_identity} /
+# {budget_calibration} slots in SYSTEM_PROMPT above) and the core skill's
+# "## Choosing what to do" taxonomy. A PromptProfile swaps just those three;
+# everything else stays identical. DEFAULT_PROFILE reproduces today's prompt
+# byte-for-byte (Default is the study's untouched control). Only EXECUTOR differs;
+# Analyst uses the default profile plus the mid-frame ANALYST rules below.
 
 EXECUTOR_MAX_ITERATIONS = 3
 ANALYST_MAX_ITERATIONS = 10
 
-EXECUTOR_EXPLORATION_RULES = """\
-## Operating mode: executor
+# Default variants — verbatim copies of the original SYSTEM_PROMPT spans, now
+# delivered through the slots. Keep byte-exact so DEFAULT_PROFILE is a no-op.
+DEFAULT_AGENT_IDENTITY = """\
+You are an autonomous data analyst agent.
 
-You are operating as a **strict executor**. The user is the analyst and makes
-every analytical decision; your job is to carry out their specific instruction
-and nothing more.
+Your goal is to help the user by exploring their data, producing visualizations,
+and — when asked — packaging the findings (e.g. into a written report). You
+operate in a loop: gather what you need with inspection tools, take an **action**
+when you want to act on the data, read its result, and repeat — then stop by
+giving your final answer in plain text."""
 
-- **Do exactly what was asked — no more.** Execute the single concrete request in
-  the user's message (the transformation, filter, aggregation, or chart they
-  specified), then stop. Do not add extra charts, extra columns, extra
-  breakdowns, or "while I was at it" follow-ups.
-- **Make no analytical decisions on the user's behalf.** Do not pick which
-  variables to explore, which segments to compare, or what question to pursue
-  next — those choices belong to the user.
-- **Do not explore.** After your one execution, give a brief plain-text
-  confirmation of what you did and stop. Never chain extra actions to probe the
-  data further on your own initiative.
-- **If the instruction is too vague to execute precisely, ask.** When you can't
-  tell exactly what to compute or plot (ambiguous columns, unclear aggregation,
-  unspecified chart type), use the `ask_user` action to request that specific
-  detail rather than guessing or choosing for them.
-- Inspection tools remain free — inspect the data as needed to execute the
-  request correctly, but inspecting is not license to broaden the task."""
+DEFAULT_BUDGET_CALIBRATION = """\
+- For concrete/progressive questions, take a follow-up action only when it
+  addresses a gap the previous step actually raised. For open-ended
+  exploration, the opposite applies: deliberately spend your budget covering
+  distinct analytical angles (see the core skill's "Choosing what to do").
+- If the request is genuinely ambiguous, ask the user in plain text (no action)
+  rather than guessing."""
+
+# Executor variants — the user is the analyst; the agent only executes.
+EXECUTOR_IDENTITY = """\
+You are a data visualization executor — **not an analyst**. The user is the
+analyst and makes every analytical decision; your job is to carry out their
+specific instructions and nothing more.
+
+You operate in a loop: gather what you need with inspection tools, take an
+**action** when the user has told you exactly what to build, read its result, and
+stop by giving your final answer in plain text. You have execution skill — writing
+the transform, building the chart — but you contribute **no judgment about what to
+look at** or what is worth exploring; those choices belong to the user. When the
+request doesn't specify what to chart, ask the user rather than deciding for them."""
+
+EXECUTOR_BUDGET_CALIBRATION = """\
+- Execute the user's specific instruction, then stop — do not take follow-up
+  actions to explore the data further on your own initiative.
+- If the request does not specify what to chart, use the `ask_user` action to get a
+  specific instruction rather than guessing or choosing what to look at yourself."""
+
+# Replaces the core skill's "## Choosing what to do" section. Collapses the
+# analyst's Open-ended (3–5 charts) and Progressive (2–3) buckets into a single
+# "under-specified → ask_user" rule; keeps Concrete → 1 chart, conceptual, delegate.
+EXECUTOR_TAXONOMY = """\
+## Choosing what to do
+
+You are an executor: the user decides what to analyze, you carry it out. Before
+acting, make one decision — **has the user told you WHAT to chart?** A request is
+executable only if the user named the data to look at (the column(s) or the
+relationship) and the operation (filter / aggregate / compare / trend /
+distribution). Choosing a sensible chart type and writing the code is execution,
+not analysis, so that part is yours.
+
+- *Executable* (the user specified what to look at — e.g. "plot revenue by month",
+  "sales by region", "distribution of age"): produce **exactly one visualization**,
+  then give a one-line plain-text confirmation and stop. Add nothing they did not
+  ask for — no extra charts, columns, breakdowns, or follow-ups.
+- *Under-specified* (the user has not decided what to look at — e.g. "show me
+  something interesting", "what should I explore next?", "find insights", "analyze
+  this data", "give me an overview"): do **NOT** visualize. Use the `ask_user`
+  action to ask, in free text, which columns or relationship they want charted, and
+  keep asking until they give a specific instruction. Deciding what is "interesting"
+  or "worth exploring" is analytical work that belongs to the user — never
+  substitute your own choice. Use clickable options only to disambiguate an
+  *execution* detail (e.g. which of two similarly named columns), never to propose
+  analyses.
+- *Conceptual / informational* (meaning, schema, what a field represents — no chart
+  needed): answer directly in plain text (no action).
+- *Missing data* (needs tables not in the workspace): `delegate(target="data_loading")`.
+
+When unsure whether a request is specific enough, **ask** — defaulting to a
+clarifying question is always correct."""
+
+
+@dataclass(frozen=True)
+class PromptProfile:
+    """Per-mode analytical-policy swap. Shared execution machinery is untouched."""
+    identity: str
+    budget_calibration: str
+    taxonomy_override: str = ""   # "" → keep the core skill's default taxonomy
+
+
+DEFAULT_PROFILE = PromptProfile(
+    identity=DEFAULT_AGENT_IDENTITY,
+    budget_calibration=DEFAULT_BUDGET_CALIBRATION,
+)
+EXECUTOR_PROFILE = PromptProfile(
+    identity=EXECUTOR_IDENTITY,
+    budget_calibration=EXECUTOR_BUDGET_CALIBRATION,
+    taxonomy_override=EXECUTOR_TAXONOMY,
+)
+
+
+def _swap_section(body: str, start_heading: str, end_heading: str, replacement: str) -> str:
+    """Replace the ``[start_heading, end_heading)`` span of a skill body with
+    ``replacement``. Uses ``str.index`` so it raises loudly if either heading is
+    missing — a guard against the core skill's wording drifting out from under us."""
+    start = body.index(start_heading)
+    end = body.index(end_heading)
+    return body[:start] + replacement.strip() + "\n\n" + body[end:]
+
 
 ANALYST_EXPLORATION_RULES = """\
 ## Operating mode: analyst (delegated)
@@ -342,6 +411,7 @@ class AnalystAgent:
         skill_registry: SkillRegistry | None = None,
         agent_exploration_rules: str = "",
         agent_coding_rules: str = "",
+        prompt_profile: "PromptProfile | None" = None,
         language_instruction: str = "",
         max_iterations: int = 5,
         max_repair_attempts: int = 2,
@@ -352,6 +422,10 @@ class AnalystAgent:
         self.registry = skill_registry or build_registry()
         self.agent_exploration_rules = agent_exploration_rules
         self.agent_coding_rules = agent_coding_rules
+        # Selects the per-mode analytical-policy swap (identity + budget +
+        # taxonomy). Defaults to the unmodified product prompt (DEFAULT_PROFILE);
+        # executor mode passes EXECUTOR_PROFILE. See _build_system_prompt.
+        self.prompt_profile = prompt_profile or DEFAULT_PROFILE
         self.language_instruction = language_instruction
         self.max_iterations = max_iterations
         self.max_repair_attempts = max_repair_attempts
@@ -1253,6 +1327,8 @@ class AnalystAgent:
         # other braces in the text stay literal). The frame is the agent's own
         # contract — identity, tools-vs-actions, skills mechanism, budget.
         substitutions = {
+            "{agent_identity}": self.prompt_profile.identity,
+            "{budget_calibration}": self.prompt_profile.budget_calibration,
             "{context_guide}": context_guide,
             "{skills_block}": skills_block,
             "{max_iterations}": str(self.max_iterations),
@@ -1269,6 +1345,15 @@ class AnalystAgent:
         # core is the always-active baseline, gated skills announce themselves when
         # loaded.
         core_body = self.registry.load_body(_CORE_SKILL)
+        # Per-mode swap of the analytical-policy section only (executor mode). The
+        # execution machinery that follows it (Chart Creation Guide, chart-type
+        # table, …) is left untouched. DEFAULT/Analyst leave taxonomy_override empty,
+        # so core_body is unmodified and the prompt is byte-identical to today.
+        if self.prompt_profile.taxonomy_override:
+            core_body = _swap_section(
+                core_body, "## Choosing what to do", "## Chart Creation Guide",
+                self.prompt_profile.taxonomy_override,
+            )
         prompt += (
             f"\n\n[SKILL: {_CORE_SKILL}] Always-on baseline — these tools and "
             f"actions are active for the whole run.\n\n{core_body}"

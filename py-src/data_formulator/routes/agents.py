@@ -37,8 +37,8 @@ from data_formulator.analyst.agent import (
     AnalystAgent,
     ANALYST_EXPLORATION_RULES,
     ANALYST_MAX_ITERATIONS,
-    EXECUTOR_EXPLORATION_RULES,
     EXECUTOR_MAX_ITERATIONS,
+    EXECUTOR_PROFILE,
 )
 from data_formulator.analyst.mini_agent import MiniAnalystAgent
 from data_formulator.agents.agent_language import build_language_instruction
@@ -377,11 +377,14 @@ def analyst_streaming():
     completed_step_count = content.get("completed_step_count", 0)
 
     # Apply the study behavioral profile (standard agent only). Server-side
-    # presets keep the experiment reproducible and tamper-resistant.
+    # presets keep the experiment reproducible and tamper-resistant. Executor
+    # swaps a coherent per-mode prompt profile (identity + budget + taxonomy);
+    # analyst reinforces exploration via the mid-frame slot. Default = neither.
+    prompt_profile = None
     if agent_mode != "mini" and analysis_mode in ("executor", "analyst"):
         if analysis_mode == "executor":
             max_iterations = EXECUTOR_MAX_ITERATIONS
-            agent_exploration_rules = EXECUTOR_EXPLORATION_RULES
+            prompt_profile = EXECUTOR_PROFILE
         else:
             max_iterations = ANALYST_MAX_ITERATIONS
             agent_exploration_rules = ANALYST_EXPLORATION_RULES
@@ -420,6 +423,7 @@ def analyst_streaming():
                     workspace=workspace,
                     agent_exploration_rules=agent_exploration_rules,
                     agent_coding_rules=agent_coding_rules,
+                    prompt_profile=prompt_profile,
                     language_instruction=language_instruction,
                     max_iterations=max_iterations,
                     max_repair_attempts=max_repair_attempts,
