@@ -265,6 +265,69 @@ execute — you'll be asked to load it first. Extension skills available this ru
 
 
 # ---------------------------------------------------------------------------
+# User-study behavioral presets (Executor vs. Analyst)
+# ---------------------------------------------------------------------------
+#
+# The study variant runs the standard AnalystAgent but selects one of two
+# behavioral profiles per request via the ``analysis_mode`` field (see
+# ``routes/agents.py``). Each profile is just an iteration budget plus a block of
+# text dropped into the existing ``{agent_exploration_rules}`` slot above — no new
+# agent class. The budget is the hard guarantee (executor commits at most a few
+# actions); the rules shape intent within that budget.
+
+EXECUTOR_MAX_ITERATIONS = 3
+ANALYST_MAX_ITERATIONS = 10
+
+EXECUTOR_EXPLORATION_RULES = """\
+## Operating mode: executor
+
+You are operating as a **strict executor**. The user is the analyst and makes
+every analytical decision; your job is to carry out their specific instruction
+and nothing more.
+
+- **Do exactly what was asked — no more.** Execute the single concrete request in
+  the user's message (the transformation, filter, aggregation, or chart they
+  specified), then stop. Do not add extra charts, extra columns, extra
+  breakdowns, or "while I was at it" follow-ups.
+- **Make no analytical decisions on the user's behalf.** Do not pick which
+  variables to explore, which segments to compare, or what question to pursue
+  next — those choices belong to the user.
+- **Do not explore.** After your one execution, give a brief plain-text
+  confirmation of what you did and stop. Never chain extra actions to probe the
+  data further on your own initiative.
+- **If the instruction is too vague to execute precisely, ask.** When you can't
+  tell exactly what to compute or plot (ambiguous columns, unclear aggregation,
+  unspecified chart type), use the `ask_user` action to request that specific
+  detail rather than guessing or choosing for them.
+- Inspection tools remain free — inspect the data as needed to execute the
+  request correctly, but inspecting is not license to broaden the task."""
+
+ANALYST_EXPLORATION_RULES = """\
+## Operating mode: analyst (delegated)
+
+The user has **handed the analysis to you**. You are now the analyst: drive the
+exploration yourself, make the analytical decisions, and work across multiple
+steps toward genuine insight.
+
+- **Explore on your own initiative.** Don't wait for instructions — decide what is
+  worth examining, then pursue it. Spend your action budget covering *distinct*
+  analytical angles (distributions, comparisons across groups, trends over time,
+  relationships between variables, outliers), not variations of one chart.
+- **Build a sequence.** Treat each visualization as a step: read what it reveals,
+  then let the next action follow up on the most interesting thread it exposed.
+  Form hypotheses and test them against the data.
+- **Make the calls yourself.** Choose which variables, segments, and chart types
+  best surface the structure of the data. You don't need permission for routine
+  analytical choices.
+- **Only ask when truly blocked.** Use `ask_user` sparingly — reserve it for a
+  decision that genuinely needs the user's domain knowledge or intent, not for
+  routine analytical choices you can reasonably make yourself.
+- **Close with a synthesis.** When you've covered the ground worth covering, end
+  with a plain-text summary of what you found — the key patterns, surprises, and
+  takeaways — rather than trailing off after the last chart."""
+
+
+# ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
 

@@ -33,7 +33,13 @@ from data_formulator.agents.client_utils import Client
 from data_formulator.model_registry import model_registry
 from data_formulator.knowledge.store import KnowledgeStore
 
-from data_formulator.analyst.agent import AnalystAgent
+from data_formulator.analyst.agent import (
+    AnalystAgent,
+    ANALYST_EXPLORATION_RULES,
+    ANALYST_MAX_ITERATIONS,
+    EXECUTOR_EXPLORATION_RULES,
+    EXECUTOR_MAX_ITERATIONS,
+)
 from data_formulator.analyst.mini_agent import MiniAnalystAgent
 from data_formulator.agents.agent_language import build_language_instruction
 from data_formulator.security.sanitize import classify_llm_error, sanitize_error_message
@@ -355,6 +361,12 @@ def analyst_streaming():
     # per run) for small/local models; anything else uses the standard agent.
     agent_mode = content.get("agent_mode", "standard")
     agent_exploration_rules = content.get("agent_exploration_rules", "")
+    # User-study behavioral profile for the standard agent. "executor" caps the
+    # run to a few committing actions and tells the agent to execute exactly what
+    # was asked; "analyst" lets it explore autonomously. When set, these presets
+    # are the source of truth and override max_iterations / exploration rules.
+    # Absent (None) preserves legacy behavior; "mini" ignores it.
+    analysis_mode = content.get("analysis_mode")
     agent_coding_rules = content.get("agent_coding_rules", "")
     focused_thread = content.get("focused_thread", None)
     other_threads = content.get("other_threads", None)
@@ -364,11 +376,21 @@ def analyst_streaming():
     resume_trajectory = content.get("trajectory", None)
     completed_step_count = content.get("completed_step_count", 0)
 
+    # Apply the study behavioral profile (standard agent only). Server-side
+    # presets keep the experiment reproducible and tamper-resistant.
+    if agent_mode != "mini" and analysis_mode in ("executor", "analyst"):
+        if analysis_mode == "executor":
+            max_iterations = EXECUTOR_MAX_ITERATIONS
+            agent_exploration_rules = EXECUTOR_EXPLORATION_RULES
+        else:
+            max_iterations = ANALYST_MAX_ITERATIONS
+            agent_exploration_rules = ANALYST_EXPLORATION_RULES
+
     if resume_trajectory is not None and not str(user_question or "").strip():
         return stream_preflight_error(AppError(ErrorCode.INVALID_REQUEST, "user_question is required to resume after interaction"))
 
     logger.setLevel(logging.INFO)
-    logger.info(f"# analyst-streaming request (agent_mode={agent_mode})")
+    logger.info(f"# analyst-streaming request (agent_mode={agent_mode}, analysis_mode={analysis_mode}, max_iterations={max_iterations})")
     logger.debug("== input tables ===>")
     for table in input_tables:
         logger.debug(f"===> Table: {table['name']}")
