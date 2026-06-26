@@ -113,7 +113,11 @@
     "localRowLimitHint": "Maximum number of rows kept when loading data locally (not stored on server).",
     "maxStretchFactor": "max chart stretch factor",
     "maxStretchFactorRangeError": "Value must be between 1.0 and 5.0",
-    "maxStretchFactorHint": "How much charts can grow beyond the base size (1.0 = no stretch, 2.0 = up to 2×)."
+    "maxStretchFactorHint": "How much charts can grow beyond the base size (1.0 = no stretch, 2.0 = up to 2×).",
+    "studyMode": "Agent mode",
+    "studyModeDefault": "Default",
+    "studyModeExecutor": "Executor",
+    "studyModeAnalyst": "Analyst"
   },
   "landing": {
     "tagline": "Explore data with visualizations, powered by AI agents.",
@@ -545,6 +549,8 @@
     "endConversation": "End conversation",
     "sendReply": "Send reply",
     "explore": "Explore",
+    "send": "Send",
+    "exploreForMe": "Explore for me",
     "regenerateIdeas": "Regenerate ideas",
     "interruptedByRefresh": "Interrupted by page refresh",
     "generatingIdeas": "Generating exploration ideas...",

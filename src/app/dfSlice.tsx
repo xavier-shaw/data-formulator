@@ -118,6 +118,7 @@ export interface ClientConfig {
     frontendRowLimit: number; // max rows to keep in browser when loading locally (non-virtual)
     paletteKey: string; // active color palette key from tokens.ts
     miniMode: boolean; // when true, run the single-turn MiniAnalystAgent (for small/local models)
+    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained; 'analyst' = constrained + power button (delegated exploration)
 }
 
 export interface GeneratedReport {
@@ -332,6 +333,7 @@ const initialState: DataFormulatorState = {
         frontendRowLimit: DEFAULT_ROW_LIMIT,
         paletteKey: 'fluent',
         miniMode: false,
+        studyCondition: 'default',
     },
 
     dataLoaderConnectParams: {},

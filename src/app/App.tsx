@@ -46,6 +46,10 @@ import {
     IconButton,
     Select,
     FormControl,
+    FormLabel,
+    FormControlLabel,
+    Radio,
+    RadioGroup,
     InputLabel,
     ListItemIcon,
     ListItemText,
@@ -493,12 +497,14 @@ const ConfigDialog: React.FC = () => {
     const [paletteKey, setPaletteKey] = useState(
         (config.paletteKey && palettes[config.paletteKey]) ? config.paletteKey : defaultPaletteKey
     );
+    const [studyCondition, setStudyCondition] = useState<'default' | 'executor' | 'analyst'>(config.studyCondition ?? 'default');
 
-    const hasChanges = formulateTimeoutSeconds !== config.formulateTimeoutSeconds || 
+    const hasChanges = formulateTimeoutSeconds !== config.formulateTimeoutSeconds ||
                       defaultChartWidth !== config.defaultChartWidth ||
                       defaultChartHeight !== config.defaultChartHeight ||
                       maxStretchFactor !== config.maxStretchFactor ||
                       frontendRowLimit !== config.frontendRowLimit ||
+                      studyCondition !== (config.studyCondition ?? 'default') ||
                       paletteKey !== ((config.paletteKey && palettes[config.paletteKey]) ? config.paletteKey : defaultPaletteKey);
 
     return (
@@ -687,6 +693,21 @@ const ConfigDialog: React.FC = () => {
                                 </Typography>
                             </Box>
                         </Box>
+                        <Divider><Typography variant="caption">{t('config.studyMode')}</Typography></Divider>
+                        <FormControl sx={{ display: 'block' }}>
+                            <RadioGroup
+                                row
+                                value={studyCondition}
+                                onChange={(e) => setStudyCondition(e.target.value as 'default' | 'executor' | 'analyst')}
+                            >
+                                <FormControlLabel value="default" control={<Radio size="small" />}
+                                    label={<Typography variant="body2">{t('config.studyModeDefault')}</Typography>} />
+                                <FormControlLabel value="executor" control={<Radio size="small" />}
+                                    label={<Typography variant="body2">{t('config.studyModeExecutor')}</Typography>} />
+                                <FormControlLabel value="analyst" control={<Radio size="small" />}
+                                    label={<Typography variant="body2">{t('config.studyModeAnalyst')}</Typography>} />
+                            </RadioGroup>
+                        </FormControl>
                     </Box>
                 </DialogContent>
                 <DialogActions sx={{'.MuiButton-root': {textTransform: 'none'}}}>
@@ -697,6 +718,7 @@ const ConfigDialog: React.FC = () => {
                         setMaxStretchFactor(2.0);
                         setFrontendRowLimit(rowLimitDefault);
                         setPaletteKey(defaultPaletteKey);
+                        setStudyCondition('default');
                     }}>{t('session.resetToDefault')}</Button>
                     <Button onClick={() => setOpen(false)}>{t('app.cancel')}</Button>
                     <Button 
@@ -707,7 +729,7 @@ const ConfigDialog: React.FC = () => {
                             || isNaN(maxStretchFactor) || maxStretchFactor < 1 || maxStretchFactor > 5
                             || isNaN(frontendRowLimit) || frontendRowLimit < 100 || frontendRowLimit > rowLimitMax}
                         onClick={() => {
-                            dispatch(dfActions.setConfig({formulateTimeoutSeconds, defaultChartWidth, defaultChartHeight, maxStretchFactor, frontendRowLimit, paletteKey, miniMode: config.miniMode ?? false}));
+                            dispatch(dfActions.setConfig({formulateTimeoutSeconds, defaultChartWidth, defaultChartHeight, maxStretchFactor, frontendRowLimit, paletteKey, miniMode: config.miniMode ?? false, studyCondition}));
                             setOpen(false);
                         }}
                     >

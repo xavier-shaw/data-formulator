@@ -1098,7 +1098,10 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
             pointerEvents: 'none', '& > *': { pointerEvents: 'auto' },
         }}>
             {chartResizer}
-            {focusedChart && focusedChart.chartType !== 'Table' && focusedChart.chartType !== 'Auto' && (
+            {/* Chart style module: Default condition only. Both study conditions
+                (Executor, Analyst) hide it to keep the participant surface focused
+                on the analysis, not chart restyling. */}
+            {(config.studyCondition ?? 'default') === 'default' && focusedChart && focusedChart.chartType !== 'Table' && focusedChart.chartType !== 'Auto' && (
                 <ChartVariantStrip chartId={focusedChart.id} />
             )}
             {/* Right-aligned floating cluster near the top-right: "inspect /

@@ -5,6 +5,7 @@ import React, { FC, useState, useCallback, useRef, useEffect } from 'react';
 
 import {
     Box,
+    Button,
     IconButton,
     Tooltip,
     Typography,
@@ -35,6 +36,7 @@ import { alpha } from '@mui/material/styles';
 import { WritingPencil } from '../components/FunComponents';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import AddIcon from '@mui/icons-material/Add';
+import BoltIcon from '@mui/icons-material/Bolt';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import BoltIcon from '@mui/icons-material/Bolt';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
@@ -82,6 +84,18 @@ const StarterChip: FC<{ label: string; onClick: () => void; sx: any }> = ({ labe
         </Tooltip>
     );
 };
+
+// User-study "Analyst" power button: clicking it ignores whatever the participant
+// typed and hands the analysis to the agent. DELEGATION_TEMPLATE_PROMPT is the
+// message the agent actually receives (plain user voice); the behavioral
+// guarantees live server-side in ANALYST_EXPLORATION_RULES. The display label is
+// the clean bubble shown in the timeline.
+const DELEGATION_TEMPLATE_PROMPT =
+    "Take over the analysis of this dataset. Explore it on your own initiative: " +
+    "figure out what is most interesting or important here, investigate it across " +
+    "multiple steps with visualizations, test what you notice, and then tell me " +
+    "what you found. I am handing the analytical decisions to you.";
+const DELEGATION_DISPLAY_LABEL = '🔋 Take over the analysis';
 
 const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme; onCancel?: () => void; color?: 'primary' | 'warning' }> = ({ message, elapsed, theme, onCancel, color = 'primary' }) => {
     const { t } = useTranslation();
@@ -603,8 +617,15 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         completedStepCount: number;
         actionId: string;
         lastCreatedTableId: string | null;
-    }, displayPrompt?: string) => {
+    }, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst') => {
         if (!focusedTableId || (!clarificationContext && prompt.trim() === "")) return;
+
+        // Resolve the study behavioral profile. The power button passes an explicit
+        // 'analyst' override; otherwise the condition decides: 'default' sends no
+        // analysis_mode (backend legacy path = existing behavior), while 'executor'
+        // and 'analyst' conditions constrain typed instructions to executor.
+        const analysisMode: 'executor' | 'analyst' | undefined =
+            analysisModeOverride ?? (config.studyCondition === 'default' ? undefined : 'executor');
 
         // Fold attached reference files into the prompt the agent sees, while
         // keeping the timeline bubble (displayContent) clean for the user.
@@ -673,6 +694,11 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             model: activeModel,
             max_iterations: 10,
             agent_mode: config.miniMode ? 'mini' : 'standard',
+            // User-study behavioral profile. Omitted in the 'default' condition so
+            // the backend runs its existing path; otherwise 'executor' (typed) or
+            // 'analyst' (power button). The backend maps this to the action budget
+            // + exploration rules (source of truth).
+            ...(analysisMode ? { analysis_mode: analysisMode } : {}),
         };
 
         // ── Route through the unified AnalystAgent (design-35/36) ──
@@ -1493,7 +1519,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     }, [agentHandoffRequest]);
 
     // ── Unified submit handler ───────────────────────────────────────
-    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string) => {
+    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst') => {
         if (clarificationCtx) {
             // Build the structured response payload. The backend assembles
             // the final LLM-facing text ("Selected answers: 1. xxx; 2. yyy\n
@@ -1514,10 +1540,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             // as `prompt` — it powers both the timeline bubble and the
             // user message appended to the trajectory on the backend.
             const displayPrompt = formatClarificationResponses(responses);
-            exploreFromChat(displayPrompt, clarificationCtx);
+            exploreFromChat(displayPrompt, clarificationCtx, undefined, analysisModeOverride);
             return;
         }
-        exploreFromChat(prompt, undefined, displayPrompt);
+        exploreFromChat(prompt, undefined, displayPrompt, analysisModeOverride);
     }, [exploreFromChat, clarificationQuestions, clarifyAnswers]);
 
     // Replay a workflow: the KnowledgePanel fires `df-replay-workflow`
@@ -1893,52 +1919,141 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         style={{ display: 'none' }}
                         onChange={(e) => { handleAttachFiles(e.target.files); if (e.target) e.target.value = ''; }}
                     />
-                    <Tooltip title={t('chartRec.attachContext', { defaultValue: 'Attach context (image or file)' })}>
-                        <IconButton
-                            size="small"
-                            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                            sx={{
-                                p: 0.5,
-                                color: theme.palette.text.secondary,
-                                borderRadius: '4px',
-                                '&:hover': { color: theme.palette.primary.main, backgroundColor: alpha(theme.palette.primary.main, 0.06) },
-                            }}
-                        >
-                            <AddIcon sx={{ fontSize: 18 }} />
-                        </IconButton>
-                    </Tooltip>
+                    {/* The attach / report / get-ideas buttons belong to the
+                        unmodified Default condition. Both study conditions
+                        (Executor, Analyst) hide them to keep the participant's
+                        surface minimal — only typed instructions (+ the Analyst
+                        power button) drive the agent. */}
+                    {(config.studyCondition ?? 'default') === 'default' && (
+                        <Tooltip title={t('chartRec.attachContext', { defaultValue: 'Attach context (image or file)' })}>
+                            <IconButton
+                                size="small"
+                                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                                sx={{
+                                    p: 0.5,
+                                    color: theme.palette.text.secondary,
+                                    borderRadius: '4px',
+                                    '&:hover': { color: theme.palette.primary.main, backgroundColor: alpha(theme.palette.primary.main, 0.06) },
+                                }}
+                            >
+                                <AddIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
+                        </Tooltip>
+                    )}
                 </Box>
-                <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                 {isChatFormulating ? (
                     <CircularProgress size={18} sx={{ m: 0.5 }} />
                 ) : (
                     <>
-                        <Tooltip title={t('chartRec.generateReport')}>
-                            <span>
-                                <IconButton
-                                    size="small"
-                                    sx={{ p: 0.5, color: theme.palette.text.secondary }}
-                                    aria-label={t('chartRec.generateReport')}
-                                    disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
-                                    onClick={() => submitChat(t('chartRec.reportPrompt'), undefined, t('chartRec.askedForReport'))}
-                                >
-                                    <EditOutlinedIcon sx={{ fontSize: 18 }} />
-                                </IconButton>
-                            </span>
-                        </Tooltip>
-                        <Tooltip title={t('chartRec.getIdeaSuggestions')}>
-                            <span>
-                                <IconButton
-                                    size="small"
-                                    sx={{ p: 0.5, color: theme.palette.primary.main }}
-                                    aria-label={t('chartRec.getIdeaSuggestions')}
-                                    disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
-                                    onClick={() => submitChat(t('chartRec.exploreIdeasPrompt'), undefined, t('chartRec.askedForRecommendations'))}
-                                >
-                                    <TipsAndUpdatesIcon sx={{ fontSize: 18 }} />
-                                </IconButton>
-                            </span>
-                        </Tooltip>
+                        {/* Report + Get-Ideas: Default condition only (hidden in
+                            both study conditions). */}
+                        {(config.studyCondition ?? 'default') === 'default' && (
+                            <Tooltip title={t('chartRec.generateReport')}>
+                                <span>
+                                    <IconButton
+                                        size="small"
+                                        sx={{ p: 0.5, color: theme.palette.text.secondary }}
+                                        aria-label={t('chartRec.generateReport')}
+                                        disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
+                                        onClick={() => submitChat(t('chartRec.reportPrompt'), undefined, t('chartRec.askedForReport'))}
+                                    >
+                                        <EditOutlinedIcon sx={{ fontSize: 18 }} />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                        )}
+                        {(config.studyCondition ?? 'default') === 'default' && (
+                            <Tooltip title={t('chartRec.getIdeaSuggestions')}>
+                                <span>
+                                    <IconButton
+                                        size="small"
+                                        sx={{ p: 0.5, color: theme.palette.primary.main }}
+                                        aria-label={t('chartRec.getIdeaSuggestions')}
+                                        disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
+                                        onClick={() => submitChat(t('chartRec.exploreIdeasPrompt'), undefined, t('chartRec.askedForRecommendations'))}
+                                    >
+                                        <TipsAndUpdatesIcon sx={{ fontSize: 18 }} />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                        )}
+                        {/* User-study Analyst condition: hand the analysis to the
+                            agent for autonomous multi-step exploration. Ignores
+                            typed input — sends a fixed delegation prompt. Hidden in
+                            Default and Executor. */}
+                        {(config.studyCondition ?? 'default') === 'analyst' && (
+                            <Tooltip title={t('chartRec.delegateToAnalyst', { defaultValue: 'Hand the analysis to the agent (explores on its own)' })}>
+                                <span>
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<BoltIcon sx={{ fontSize: 16 }} />}
+                                        aria-label={t('chartRec.exploreForMe')}
+                                        disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
+                                        onClick={() => submitChat(DELEGATION_TEMPLATE_PROMPT, undefined, DELEGATION_DISPLAY_LABEL, 'analyst')}
+                                        sx={{
+                                            textTransform: 'none',
+                                            height: 30,
+                                            px: 1.25,
+                                            borderRadius: '8px',
+                                            fontSize: '0.78rem',
+                                            fontWeight: 400,
+                                            whiteSpace: 'nowrap',
+                                            minWidth: 0,
+                                            color: 'primary.main',
+                                            borderColor: alpha(theme.palette.primary.main, 0.4),
+                                            '& .MuiButton-startIcon': { mr: 0.5, ml: -0.25 },
+                                            '&:hover': {
+                                                borderColor: 'primary.main',
+                                                backgroundColor: alpha(theme.palette.primary.main, 0.06),
+                                            },
+                                            '&.Mui-disabled': {
+                                                borderColor: alpha(theme.palette.text.disabled, 0.3),
+                                                color: 'text.disabled',
+                                            },
+                                        }}
+                                    >
+                                        {t('chartRec.exploreForMe')}
+                                    </Button>
+                                </span>
+                            </Tooltip>
+                        )}
+                        {/* In the study conditions the send affordance carries a
+                            "Send" text label (alongside the Analyst "Explore for
+                            me" button); Default keeps the compact icon-only arrow. */}
+                        {(config.studyCondition ?? 'default') !== 'default' ? (
+                            <Button
+                                size="small"
+                                variant="contained"
+                                disableElevation
+                                aria-label={t('chartRec.send')}
+                                disabled={!canSend}
+                                onClick={() => {
+                                    if (pendingClarification) {
+                                        submitChat(chatPrompt, pendingClarification);
+                                    } else {
+                                        submitChat(chatPrompt);
+                                    }
+                                }}
+                                startIcon={<ArrowUpwardRoundedIcon sx={{ fontSize: 16 }} />}
+                                sx={{
+                                    textTransform: 'none',
+                                    height: 30,
+                                    px: 1.5,
+                                    borderRadius: '8px',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 400,
+                                    whiteSpace: 'nowrap',
+                                    minWidth: 0,
+                                    boxShadow: 'none',
+                                    '& .MuiButton-startIcon': { mr: 0.5, ml: -0.25 },
+                                    '&:hover': { boxShadow: 'none', bgcolor: 'primary.dark' },
+                                }}
+                            >
+                                {t('chartRec.send')}
+                            </Button>
+                        ) : (
                         <Tooltip title={t('chartRec.explore')}>
                             <span>
                                 <IconButton
@@ -1975,6 +2090,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                 </IconButton>
                             </span>
                         </Tooltip>
+                        )}
                     </>
                 )}
                 </Box>

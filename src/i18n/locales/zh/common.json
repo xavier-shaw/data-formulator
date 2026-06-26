@@ -113,7 +113,11 @@
     "localRowLimitHint": "本地加载数据时保留的最大行数（不存储到服务端）。",
     "maxStretchFactor": "图表最大拉伸系数",
     "maxStretchFactorRangeError": "取值必须在 1.0 到 5.0 之间",
-    "maxStretchFactorHint": "图表可在基础尺寸上放大的倍数（1.0 = 不拉伸，2.0 = 最大 2 倍）。"
+    "maxStretchFactorHint": "图表可在基础尺寸上放大的倍数（1.0 = 不拉伸，2.0 = 最大 2 倍）。",
+    "studyMode": "智能体模式",
+    "studyModeDefault": "默认",
+    "studyModeExecutor": "执行者",
+    "studyModeAnalyst": "分析师"
   },
   "landing": {
     "tagline": "用 AI Agent 驱动可视化探索数据。",
@@ -597,6 +601,8 @@
     "endConversation": "结束对话",
     "sendReply": "发送回复",
     "explore": "探索",
+    "send": "发送",
+    "exploreForMe": "替我探索",
     "regenerateIdeas": "重新生成建议",
     "interruptedByRefresh": "因页面刷新中断",
     "generatingIdeas": "正在生成探索建议...",
