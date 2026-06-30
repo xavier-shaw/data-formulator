@@ -241,7 +241,9 @@ lists multiple names, pick whichever fits the "when to use" hint best.
 - **Candlestick Chart**: requires `open`, `high`, `low`, `close` columns.
 - **World Map / US Map**: channel names are `longitude` / `latitude`, not `x` / `y`.
 - **facet**: available for nearly all chart types; use a low-cardinality categorical field.
-- All fields in `encodings` must also appear in `output_fields`. Typically use 2–3 channels (x, y, color/size).
+- **No redundant encoding — one field per channel.** Each channel must carry *distinct* information. Never map the same field to two channels (e.g. the value on both `y` and `size`, or the same quantity on `color` and `size`): the duplicate adds visual weight without meaning and implies a second variable that isn't there. If there is no additional variable worth showing, leave the channel empty rather than echoing an axis.
+- **Keep encodings minimal — don't overload the chart.** Default to the fewest channels that answer the question: `x`, `y`, plus at most one of `color`/`size`/`facet`. Add further channels only when the user explicitly asks for them or the analytical goal clearly requires it. In particular, do **not** use more than one *continuous* (quantitative) channel beyond the axes — a quantitative `color` scale and `size` together force the reader to track two magnitude scales at once and are easily confused. Prefer a categorical `color` (a few groups); to show an extra quantitative variable, use a separate chart or `facet` rather than stacking scales onto one.
+- All fields in `encodings` must also appear in `output_fields`.
 
 ### C. Semantic Type Reference
 
