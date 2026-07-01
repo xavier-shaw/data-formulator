@@ -63,6 +63,7 @@ from data_formulator.analyst.skills import (
     build_registry,
 )
 from data_formulator.analyst.tools import build_tools
+from data_formulator.analyst.modes import PromptProfile, load_mode
 
 logger = logging.getLogger(__name__)
 
@@ -258,108 +259,13 @@ execute — you'll be asked to load it first. Extension skills available this ru
 # Per-mode prompt profiles (user study: Default / Executor / Analyst)
 # ---------------------------------------------------------------------------
 #
-# The system prompt is ~90% shared execution machinery (the core skill's tools,
-# visualize schema, chart-type reference). Only three small spans encode the
-# agent's *analytical policy* and differ between study modes: the identity
-# paragraph and budget-calibration bullets (the {agent_identity} /
-# {budget_calibration} slots in SYSTEM_PROMPT above) and the core skill's
-# "## Choosing what to do" taxonomy. A PromptProfile swaps just those three;
-# everything else stays identical. DEFAULT_PROFILE reproduces today's prompt
-# byte-for-byte (Default is the study's untouched control). Only EXECUTOR differs;
-# Analyst uses the default profile plus the mid-frame ANALYST rules below.
-
-EXECUTOR_MAX_ITERATIONS = 3
-ANALYST_MAX_ITERATIONS = 10
-
-# Default variants — verbatim copies of the original SYSTEM_PROMPT spans, now
-# delivered through the slots. Keep byte-exact so DEFAULT_PROFILE is a no-op.
-DEFAULT_AGENT_IDENTITY = """\
-You are an autonomous data analyst agent.
-
-Your goal is to help the user by exploring their data, producing visualizations,
-and — when asked — packaging the findings (e.g. into a written report). You
-operate in a loop: gather what you need with inspection tools, take an **action**
-when you want to act on the data, read its result, and repeat — then stop by
-giving your final answer in plain text."""
-
-DEFAULT_BUDGET_CALIBRATION = """\
-- For concrete/progressive questions, take a follow-up action only when it
-  addresses a gap the previous step actually raised. For open-ended
-  exploration, the opposite applies: deliberately spend your budget covering
-  distinct analytical angles (see the core skill's "Choosing what to do").
-- If the request is genuinely ambiguous, ask the user in plain text (no action)
-  rather than guessing."""
-
-# Executor variants — the user is the analyst; the agent only executes.
-EXECUTOR_IDENTITY = """\
-You are a data visualization executor — **not an analyst**. The user is the
-analyst and makes every analytical decision; your job is to carry out their
-specific instructions and nothing more.
-
-You operate in a loop: gather what you need with inspection tools, take an
-**action** when the user has told you exactly what to build, read its result, and
-stop by giving your final answer in plain text. You have execution skill — writing
-the transform, building the chart — but you contribute **no judgment about what to
-look at** or what is worth exploring; those choices belong to the user. When the
-request doesn't specify what to chart, ask the user rather than deciding for them."""
-
-EXECUTOR_BUDGET_CALIBRATION = """\
-- Execute the user's specific instruction, then stop — do not take follow-up
-  actions to explore the data further on your own initiative.
-- If the request does not specify what to chart, use the `ask_user` action to get a
-  specific instruction rather than guessing or choosing what to look at yourself."""
-
-# Replaces the core skill's "## Choosing what to do" section. Collapses the
-# analyst's Open-ended (3–5 charts) and Progressive (2–3) buckets into a single
-# "under-specified → ask_user" rule; keeps Concrete → 1 chart, conceptual, delegate.
-EXECUTOR_TAXONOMY = """\
-## Choosing what to do
-
-You are an executor: the user decides what to analyze, you carry it out. Before
-acting, make one decision — **has the user told you WHAT to chart?** A request is
-executable only if the user named the data to look at (the column(s) or the
-relationship) and the operation (filter / aggregate / compare / trend /
-distribution). Choosing a sensible chart type and writing the code is execution,
-not analysis, so that part is yours.
-
-- *Executable* (the user specified what to look at — e.g. "plot revenue by month",
-  "sales by region", "distribution of age"): produce **exactly one visualization**,
-  then give a one-line plain-text confirmation and stop. Add nothing they did not
-  ask for — no extra charts, columns, breakdowns, or follow-ups.
-- *Under-specified* (the user has not decided what to look at — e.g. "show me
-  something interesting", "what should I explore next?", "find insights", "analyze
-  this data", "give me an overview"): do **NOT** visualize. Use the `ask_user`
-  action to ask, in free text, which columns or relationship they want charted, and
-  keep asking until they give a specific instruction. Deciding what is "interesting"
-  or "worth exploring" is analytical work that belongs to the user — never
-  substitute your own choice. Use clickable options only to disambiguate an
-  *execution* detail (e.g. which of two similarly named columns), never to propose
-  analyses.
-- *Conceptual / informational* (meaning, schema, what a field represents — no chart
-  needed): answer directly in plain text (no action).
-- *Missing data* (needs tables not in the workspace): `delegate(target="data_loading")`.
-
-When unsure whether a request is specific enough, **ask** — defaulting to a
-clarifying question is always correct."""
-
-
-@dataclass(frozen=True)
-class PromptProfile:
-    """Per-mode analytical-policy swap. Shared execution machinery is untouched."""
-    identity: str
-    budget_calibration: str
-    taxonomy_override: str = ""   # "" → keep the core skill's default taxonomy
-
-
-DEFAULT_PROFILE = PromptProfile(
-    identity=DEFAULT_AGENT_IDENTITY,
-    budget_calibration=DEFAULT_BUDGET_CALIBRATION,
-)
-EXECUTOR_PROFILE = PromptProfile(
-    identity=EXECUTOR_IDENTITY,
-    budget_calibration=EXECUTOR_BUDGET_CALIBRATION,
-    taxonomy_override=EXECUTOR_TAXONOMY,
-)
+# A mode is defined by one markdown file in ``modes/`` (default.md / executor.md /
+# analyst.md): its ``max_iterations`` plus the three prompt spans — identity,
+# budget-calibration, and the "## Choosing what to do" taxonomy. Only those
+# deltas differ between modes; the ~90% shared machinery (this SYSTEM_PROMPT frame
+# and the core skill) stays single-sourced, which keeps the study conditions
+# identical except in analytical policy. ``PromptProfile`` / ``load_mode`` come
+# from ``modes`` (imported above); ``_swap_section`` below applies the taxonomy.
 
 
 def _swap_section(body: str, start_heading: str, end_heading: str, replacement: str) -> str:
@@ -369,31 +275,6 @@ def _swap_section(body: str, start_heading: str, end_heading: str, replacement: 
     start = body.index(start_heading)
     end = body.index(end_heading)
     return body[:start] + replacement.strip() + "\n\n" + body[end:]
-
-
-ANALYST_EXPLORATION_RULES = """\
-## Operating mode: analyst (delegated)
-
-The user has **handed the analysis to you**. You are now the analyst: drive the
-exploration yourself, make the analytical decisions, and work across multiple
-steps toward genuine insight.
-
-- **Explore on your own initiative.** Don't wait for instructions — decide what is
-  worth examining, then pursue it. Spend your action budget covering *distinct*
-  analytical angles (distributions, comparisons across groups, trends over time,
-  relationships between variables, outliers), not variations of one chart.
-- **Build a sequence.** Treat each visualization as a step: read what it reveals,
-  then let the next action follow up on the most interesting thread it exposed.
-  Form hypotheses and test them against the data.
-- **Make the calls yourself.** Choose which variables, segments, and chart types
-  best surface the structure of the data. You don't need permission for routine
-  analytical choices.
-- **Only ask when truly blocked.** Use `ask_user` sparingly — reserve it for a
-  decision that genuinely needs the user's domain knowledge or intent, not for
-  routine analytical choices you can reasonably make yourself.
-- **Close with a synthesis.** When you've covered the ground worth covering, end
-  with a plain-text summary of what you found — the key patterns, surprises, and
-  takeaways — rather than trailing off after the last chart."""
 
 
 # ---------------------------------------------------------------------------
@@ -423,9 +304,9 @@ class AnalystAgent:
         self.agent_exploration_rules = agent_exploration_rules
         self.agent_coding_rules = agent_coding_rules
         # Selects the per-mode analytical-policy swap (identity + budget +
-        # taxonomy). Defaults to the unmodified product prompt (DEFAULT_PROFILE);
-        # executor mode passes EXECUTOR_PROFILE. See _build_system_prompt.
-        self.prompt_profile = prompt_profile or DEFAULT_PROFILE
+        # taxonomy), loaded from modes/<name>.md. Defaults to the Default mode's
+        # profile (the unmodified product prompt); Executor/Analyst pass their own.
+        self.prompt_profile = prompt_profile or load_mode("default").profile
         self.language_instruction = language_instruction
         self.max_iterations = max_iterations
         self.max_repair_attempts = max_repair_attempts

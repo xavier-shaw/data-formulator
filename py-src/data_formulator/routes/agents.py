@@ -33,13 +33,8 @@ from data_formulator.agents.client_utils import Client
 from data_formulator.model_registry import model_registry
 from data_formulator.knowledge.store import KnowledgeStore
 
-from data_formulator.analyst.agent import (
-    AnalystAgent,
-    ANALYST_EXPLORATION_RULES,
-    ANALYST_MAX_ITERATIONS,
-    EXECUTOR_MAX_ITERATIONS,
-    EXECUTOR_PROFILE,
-)
+from data_formulator.analyst.agent import AnalystAgent
+from data_formulator.analyst.modes import load_mode
 from data_formulator.analyst.mini_agent import MiniAnalystAgent
 from data_formulator.agents.agent_language import build_language_instruction
 from data_formulator.security.sanitize import classify_llm_error, sanitize_error_message
@@ -376,18 +371,17 @@ def analyst_streaming():
     resume_trajectory = content.get("trajectory", None)
     completed_step_count = content.get("completed_step_count", 0)
 
-    # Apply the study behavioral profile (standard agent only). Server-side
-    # presets keep the experiment reproducible and tamper-resistant. Executor
-    # swaps a coherent per-mode prompt profile (identity + budget + taxonomy);
-    # analyst reinforces exploration via the mid-frame slot. Default = neither.
+    # Apply the study behavioral profile (standard agent only). Each mode is a
+    # markdown file in analyst/modes/ (default.md / executor.md / analyst.md); the
+    # server loads it so the experiment stays reproducible and tamper-resistant.
+    # A mode may override max_iterations (Executor 3, Analyst 8; Default leaves the
+    # request's value). Default = no profile (the untouched control).
     prompt_profile = None
     if agent_mode != "mini" and analysis_mode in ("executor", "analyst"):
-        if analysis_mode == "executor":
-            max_iterations = EXECUTOR_MAX_ITERATIONS
-            prompt_profile = EXECUTOR_PROFILE
-        else:
-            max_iterations = ANALYST_MAX_ITERATIONS
-            agent_exploration_rules = ANALYST_EXPLORATION_RULES
+        mode = load_mode(analysis_mode)
+        if mode.max_iterations is not None:
+            max_iterations = mode.max_iterations
+        prompt_profile = mode.profile
 
     if resume_trajectory is not None and not str(user_question or "").strip():
         return stream_preflight_error(AppError(ErrorCode.INVALID_REQUEST, "user_question is required to resume after interaction"))
