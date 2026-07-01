@@ -5,8 +5,16 @@
 
 Exposes the built-in ``EXAMPLE_DATASETS`` catalog as a virtual data
 connector that behaves exactly like any other connector.  No auth, no
-external service of its own — table data is fetched on demand from the
-public URLs declared in :mod:`data_formulator.example_datasets_config`.
+external service of its own.
+
+Each table entry declares its data source as either:
+  * ``url``  — fetched on demand over HTTP from a public URL, or
+  * ``path`` — a file bundled with the repo, read directly from disk
+               (resolved relative to the ``data_formulator`` package dir,
+               e.g. ``"example_datasets/mydata.csv"``).
+
+A table may omit ``sample``; for a bundled ``path`` the catalog preview
+(columns + first rows) is then read cheaply from the file's head.
 
 The connector is registered unconditionally at startup so that even in
 ``--disable_database`` mode users still have a zero-config way to load
@@ -19,6 +27,7 @@ import io
 import json
 import logging
 import threading
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -33,15 +42,30 @@ from data_formulator.datalake.parquet_utils import (
 
 logger = logging.getLogger(__name__)
 
-# In-process cache for sample dataset DataFrames keyed by (url, format).
-# These URLs are static public datasets, so caching is safe and dramatically
-# speeds up repeat previews/loads (no network + parse cost on every click).
-# Bounded by a soft cap to avoid unbounded memory growth if the catalog ever
-# expands; eviction is simple FIFO since access patterns are interactive.
+# In-process cache for sample dataset DataFrames keyed by (source_key, format),
+# where source_key is the URL or the resolved local path. These sources are
+# static, so caching is safe and dramatically speeds up repeat previews/loads.
+# Bounded by a soft cap; eviction is simple FIFO since access is interactive.
 _SAMPLE_CACHE: dict[tuple[str, str], pd.DataFrame] = {}
 _SAMPLE_CACHE_ORDER: list[tuple[str, str]] = []
 _SAMPLE_CACHE_LOCK = threading.Lock()
 _SAMPLE_CACHE_MAX = 64
+
+# Base dir for datasets bundled with the repo (a table's ``path`` is resolved
+# against this). Kept as the ``data_formulator`` package dir so bundled files
+# ship with the package and resolve regardless of the working directory.
+_BUNDLED_BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_bundled_path(rel_path: str) -> Path:
+    """Resolve a table ``path`` against the package dir, refusing anything that
+    escapes it (zip-slip / traversal) or is missing. Raises ``ValueError``."""
+    candidate = (_BUNDLED_BASE_DIR / rel_path).resolve()
+    if _BUNDLED_BASE_DIR not in candidate.parents:
+        raise ValueError(f"dataset path escapes the package directory: {rel_path!r}")
+    if not candidate.is_file():
+        raise ValueError(f"bundled dataset file not found: {rel_path!r}")
+    return candidate
 
 
 class SampleDatasetsLoader(ExternalDataLoader):
@@ -108,8 +132,9 @@ class SampleDatasetsLoader(ExternalDataLoader):
 
     @staticmethod
     def _table_stem(table_entry: dict[str, Any], idx: int) -> str:
-        url = table_entry.get("url", "")
-        last = url.split("/")[-1].split("?")[0]
+        # Derive the table name from the file name of either the url or path.
+        ref = table_entry.get("url") or table_entry.get("path") or ""
+        last = ref.replace("\\", "/").split("/")[-1].split("?")[0]
         stem = last.rsplit(".", 1)[0] if "." in last else last
         return stem or f"table_{idx}"
 
@@ -135,6 +160,40 @@ class SampleDatasetsLoader(ExternalDataLoader):
             except Exception:
                 logger.debug("Failed to parse sample CSV preview", exc_info=True)
         return columns, sample_rows
+
+    def _columns_from_local_head(
+        self, path: Path, fmt: str, n: int = 10
+    ) -> tuple[list[dict], list[dict]]:
+        """Infer ``(columns, sample_rows)`` from the head of a bundled file.
+
+        Cheap even for large files: only the first ``n`` rows are parsed for
+        csv/tsv. For json the file is loaded once (cached) and sliced.
+        """
+        try:
+            if fmt == "csv":
+                df = pd.read_csv(path, nrows=n)
+            elif fmt == "tsv":
+                df = pd.read_csv(path, sep="\t", nrows=n)
+            else:
+                df = self._load_local_dataframe(path, fmt).head(n)
+            columns = [{"name": str(c), "type": str(df[c].dtype)} for c in df.columns]
+            return columns, df_to_safe_records(df.head(n))
+        except Exception:
+            logger.debug("Failed to read local dataset head: %s", path, exc_info=True)
+            return [], []
+
+    def _preview(self, t: dict[str, Any], fmt: str) -> tuple[list[dict], list[dict]]:
+        """Return ``(columns, sample_rows)`` for the catalog: from an embedded
+        ``sample`` when present, else from the head of a bundled ``path``."""
+        if t.get("sample") is not None:
+            return self._columns_from_sample(t.get("sample"), fmt)
+        path = t.get("path")
+        if path:
+            try:
+                return self._columns_from_local_head(_resolve_bundled_path(path), fmt)
+            except ValueError:
+                logger.warning("Bundled dataset path unavailable for preview: %r", path)
+        return [], []
 
     def _resolve(self, source_table: str) -> tuple[dict, dict, int] | None:
         """Look up ``(dataset, table_entry, table_idx)`` by ``"Dataset/stem"``.
@@ -184,7 +243,7 @@ class SampleDatasetsLoader(ExternalDataLoader):
                 if needle and needle not in source_id.lower() and needle not in desc.lower():
                     continue
                 fmt = (t.get("format") or "json").lower()
-                columns, sample_rows = self._columns_from_sample(t.get("sample"), fmt)
+                columns, sample_rows = self._preview(t, fmt)
                 results.append({
                     "name": source_id,
                     "table_key": source_id,
@@ -197,6 +256,7 @@ class SampleDatasetsLoader(ExternalDataLoader):
                         "_source_name": source_id,
                         "_format": fmt,
                         "_url": t.get("url", ""),
+                        "_path": t.get("path", ""),
                         "_live": bool(ds.get("live", False)),
                         "_refresh_interval_seconds": ds.get("refreshIntervalSeconds"),
                     },
@@ -209,7 +269,7 @@ class SampleDatasetsLoader(ExternalDataLoader):
             return {}
         ds, t, _ = resolved
         fmt = (t.get("format") or "json").lower()
-        columns, _rows = self._columns_from_sample(t.get("sample"), fmt)
+        columns, _rows = self._preview(t, fmt)
         return {
             "columns": columns,
             "description": ds.get("description", ""),
@@ -228,12 +288,18 @@ class SampleDatasetsLoader(ExternalDataLoader):
         if not resolved:
             raise ValueError(f"Unknown sample table: {source_table!r}")
         _ds, t, _idx = resolved
-        url = t.get("url", "")
         fmt = (t.get("format") or "json").lower()
-        if not url:
-            raise ValueError(f"Sample table {source_table!r} has no URL configured")
+        path = t.get("path")
+        url = t.get("url", "")
 
-        df = self._load_full_dataframe(url, fmt, source_table)
+        if path:
+            df = self._load_local_dataframe(_resolve_bundled_path(path), fmt)
+        elif url:
+            df = self._load_full_dataframe(url, fmt, source_table)
+        else:
+            raise ValueError(
+                f"Sample table {source_table!r} has neither 'path' nor 'url' configured"
+            )
 
         # Capture the true total BEFORE any slicing so callers can report
         # the real row count even when ``size`` truncates the preview.
@@ -267,50 +333,64 @@ class SampleDatasetsLoader(ExternalDataLoader):
     # Internal: cached full-dataset fetch
     # ------------------------------------------------------------------
 
-    def _load_full_dataframe(self, url: str, fmt: str, source_table: str) -> pd.DataFrame:
-        """Return the full parsed DataFrame for a sample dataset URL.
+    def _parse_text(self, text: str, fmt: str) -> pd.DataFrame:
+        """Parse raw file/response text into a DataFrame by format."""
+        if fmt == "csv":
+            return pd.read_csv(io.StringIO(text))
+        if fmt == "tsv":
+            return pd.read_csv(io.StringIO(text), sep="\t")
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            # Common JSON shapes: {data: [...]}, {rows: [...]}, or a single record
+            for k in ("data", "rows", "records", "items"):
+                if isinstance(payload.get(k), list):
+                    payload = payload[k]
+                    break
+            else:
+                payload = [payload]
+        return pd.DataFrame(payload)
 
-        Results are cached in-process: sample dataset URLs are static and
-        small, and previews/loads otherwise re-download + re-parse the
-        entire file on every click, which is visibly slow for larger
-        examples (Gapminder, Disasters, ...).
+    def _cache_get_or_set(self, key: tuple[str, str], produce) -> pd.DataFrame:
+        """Return a cached DataFrame for ``key`` or produce, cache, and return it.
+
+        Returns a shallow copy so downstream slicing (``.head(size)``) doesn't
+        mutate views the cache might re-emit later.
         """
-        key = (url, fmt)
         with _SAMPLE_CACHE_LOCK:
             cached = _SAMPLE_CACHE.get(key)
         if cached is not None:
-            # Return a shallow copy so downstream slicing (``.head(size)``)
-            # doesn't mutate views the cache might re-emit later.
             return cached.copy(deep=False)
 
-        import requests
-        logger.info("Fetching sample dataset over network: %s (%s)", source_table, url)
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        text = resp.text
-
-        if fmt == "csv":
-            df = pd.read_csv(io.StringIO(text))
-        elif fmt == "tsv":
-            df = pd.read_csv(io.StringIO(text), sep="\t")
-        else:
-            payload = json.loads(text)
-            if isinstance(payload, dict):
-                # Common JSON shapes: {data: [...]}, {rows: [...]}, or a single record
-                for k in ("data", "rows", "records", "items"):
-                    if isinstance(payload.get(k), list):
-                        payload = payload[k]
-                        break
-                else:
-                    payload = [payload]
-            df = pd.DataFrame(payload)
+        df = produce()
 
         with _SAMPLE_CACHE_LOCK:
             if key not in _SAMPLE_CACHE:
                 _SAMPLE_CACHE[key] = df
                 _SAMPLE_CACHE_ORDER.append(key)
-                # FIFO eviction once we exceed the cap.
                 while len(_SAMPLE_CACHE_ORDER) > _SAMPLE_CACHE_MAX:
                     evict = _SAMPLE_CACHE_ORDER.pop(0)
                     _SAMPLE_CACHE.pop(evict, None)
         return df.copy(deep=False)
+
+    def _load_full_dataframe(self, url: str, fmt: str, source_table: str) -> pd.DataFrame:
+        """Return the full parsed DataFrame for a sample dataset URL (cached)."""
+        def produce() -> pd.DataFrame:
+            import requests
+            logger.info("Fetching sample dataset over network: %s (%s)", source_table, url)
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            return self._parse_text(resp.text, fmt)
+
+        return self._cache_get_or_set((url, fmt), produce)
+
+    def _load_local_dataframe(self, path: Path, fmt: str) -> pd.DataFrame:
+        """Return the full parsed DataFrame for a bundled local file (cached)."""
+        def produce() -> pd.DataFrame:
+            logger.info("Reading bundled sample dataset: %s (%s)", path, fmt)
+            if fmt == "csv":
+                return pd.read_csv(path)
+            if fmt == "tsv":
+                return pd.read_csv(path, sep="\t")
+            return self._parse_text(path.read_text(encoding="utf-8"), fmt)
+
+        return self._cache_get_or_set((str(path), fmt), produce)
