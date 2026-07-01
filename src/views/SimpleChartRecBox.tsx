@@ -36,7 +36,7 @@ import { alpha } from '@mui/material/styles';
 import { WritingPencil } from '../components/FunComponents';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import AddIcon from '@mui/icons-material/Add';
-import BoltIcon from '@mui/icons-material/Bolt';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import BoltIcon from '@mui/icons-material/Bolt';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
@@ -87,15 +87,16 @@ const StarterChip: FC<{ label: string; onClick: () => void; sx: any }> = ({ labe
 
 // User-study "Analyst" power button: clicking it ignores whatever the participant
 // typed and hands the analysis to the agent. DELEGATION_TEMPLATE_PROMPT is the
-// message the agent actually receives (plain user voice); the behavioral
-// guarantees live server-side in ANALYST_EXPLORATION_RULES. The display label is
-// the clean bubble shown in the timeline.
+// message the agent actually receives (plain user voice); it now carries the full
+// analytical steering itself — the server side only raises the action budget. The
+// display label is the clean bubble shown in the timeline.
 const DELEGATION_TEMPLATE_PROMPT =
-    "Take over the analysis of this dataset. Explore it on your own initiative: " +
-    "figure out what is most interesting or important here, investigate it across " +
-    "multiple steps with visualizations, test what you notice, and then tell me " +
-    "what you found. I am handing the analytical decisions to you.";
-const DELEGATION_DISPLAY_LABEL = '🔋 Take over the analysis';
+`Act as an analyst and take over the analysis. Work across multiple steps toward a single genuine insight I can follow and understand.
+
+Before you drill in, step back and read the big picture: what's already been explored in the overall data analysis as well as this thread so far. From there, decide your direction — either continue deepening the thread that's already open, or start a new one if the current line is exhausted or a more promising angle stands out.
+
+Then commit to depth, not breadth. Spend your budget building one coherent thread rather than spreading it across many disconnected angles. Start by understanding the fields that thread depends on, then move into the patterns and relationships they reveal. Each visualization should follow from the last: read what it shows, form a hypothesis, and let the next chart test it, so the whole sequence reads as one line of reasoning a person can follow.`;
+const DELEGATION_DISPLAY_LABEL = '🤝 Take over the analysis';
 
 const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme; onCancel?: () => void; color?: 'primary' | 'warning' }> = ({ message, elapsed, theme, onCancel, color = 'primary' }) => {
     const { t } = useTranslation();
@@ -1988,7 +1989,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                     <Button
                                         size="small"
                                         variant="outlined"
-                                        startIcon={<BoltIcon sx={{ fontSize: 16 }} />}
+                                        startIcon={<LightbulbIcon sx={{ fontSize: 16 }} />}
                                         aria-label={t('chartRec.exploreForMe')}
                                         disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
                                         onClick={() => submitChat(DELEGATION_TEMPLATE_PROMPT, undefined, DELEGATION_DISPLAY_LABEL, 'analyst')}
