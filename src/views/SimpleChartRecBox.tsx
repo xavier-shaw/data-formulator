@@ -622,11 +622,13 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         if (!focusedTableId || (!clarificationContext && prompt.trim() === "")) return;
 
         // Resolve the study behavioral profile. The power button passes an explicit
-        // 'analyst' override; otherwise the condition decides: 'default' sends no
-        // analysis_mode (backend legacy path = existing behavior), while 'executor'
-        // and 'analyst' conditions constrain typed instructions to executor.
+        // 'analyst' override (delegation). Otherwise only the 'executor' condition
+        // constrains typed instructions to executor mode; the 'default' and 'analyst'
+        // conditions send no analysis_mode, so typed chat uses the normal agent
+        // (the "choosing what to do" taxonomy) — in the analyst condition the power
+        // button is the way to hand the analysis over, not typed chat.
         const analysisMode: 'executor' | 'analyst' | undefined =
-            analysisModeOverride ?? (config.studyCondition === 'default' ? undefined : 'executor');
+            analysisModeOverride ?? (config.studyCondition === 'executor' ? 'executor' : undefined);
 
         // Fold attached reference files into the prompt the agent sees, while
         // keeping the timeline bubble (displayContent) clean for the user.
