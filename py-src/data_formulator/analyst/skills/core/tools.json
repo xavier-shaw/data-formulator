@@ -59,6 +59,10 @@
             "items": { "type": "string" },
             "description": "Table names from [SOURCE TABLES] that the code reads."
           },
+          "branch_from": {
+            "type": "string",
+            "description": "Optional. Name of an existing table to attach this chart under in the data thread (its parent node). Omit to continue the current thread. Set to a source/root table name to start a separate thread, or to a prior step's output table name to branch under that node. Independent of input_tables (what the code reads)."
+          },
           "code": {
             "type": "string",
             "description": "Python code producing a DataFrame assigned to output_variable."

@@ -157,6 +157,12 @@ relational, comparative) rather than refine the last one — aim to use your ful
 budget on distinct perspectives. **Never** repeat a visualization already in the
 trajectory or in another thread.
 
+**Thread structure.** When a chart opens a genuinely new direction rather than
+deepening the current line, start it as its own thread: set the `visualize`
+action's `branch_from` to the root/source table name, so each direction reads as a
+separate thread. Omit `branch_from` to continue the current thread (the default);
+to branch under an earlier finding, name that step's output table.
+
 ## Chart Creation Guide
 
 The following reference material applies when you call the `visualize` tool.

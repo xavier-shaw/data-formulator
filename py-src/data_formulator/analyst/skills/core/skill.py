@@ -134,6 +134,7 @@ class CoreSkill:
             "action": "visualize",
             "display_instruction": display_instruction,
             "input_tables": action.get("input_tables", []),
+            "branch_from": action.get("branch_from"),
         }
 
         viz_result = ctx.runtime.run_visualize_code(

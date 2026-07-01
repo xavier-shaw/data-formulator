@@ -805,6 +805,9 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         // Track the last agent display_instruction (from "action" events)
         let lastAgentDisplayInstruction: string | null = null;
         let lastAgentInputTables: string[] = [];
+        // Thread parent the analyst agent chose for the next chart (branch_from);
+        // null = continue the current thread. Orthogonal to input_tables.
+        let lastAgentBranchFrom: string | null = null;
 
         const genTableId = () => {
             let tableSuffix = Number.parseInt((Date.now() - Math.floor(Math.random() * 10000)).toString().slice(-6));
@@ -1001,6 +1004,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             // ── action: agent chose what to do ──
             if (result.type === "action") {
                 lastAgentInputTables = result.input_tables || [];
+                lastAgentBranchFrom = result.branch_from || null;
                 if (result.action === "visualize") {
                     lastAgentDisplayInstruction = result.display_instruction || null;
                     thinkingSteps.push(t('dataThread.creatingChart') + (lastAgentDisplayInstruction ? ` ${lastAgentDisplayInstruction}` : ''));
@@ -1031,7 +1035,30 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 }
                 const displayInstruction = lastAgentDisplayInstruction || refinedGoal?.display_instruction || t('chartRec.explorationStep', { step: createdTables.length + 1, question });
 
-                const triggerTableId = lastCreatedTableId || focusedTableId!;
+                // Thread placement — enabled for the whole ANALYST condition (typed
+                // default-mode runs AND the delegated power button), not just analyst
+                // mode. The agent may set branch_from to the NAME of any existing node
+                // to hang this chart under — a source table (new thread) or an earlier
+                // step's output (deepen that line). This is the ONLY thing that
+                // determines thread structure, and it is orthogonal to derive.source
+                // (what the code read). Search all tables incl. ones created earlier
+                // THIS run (createdTables, read live); unresolved → linear fallback.
+                // Executor/Default conditions never honor it → their threads are unchanged.
+                let resolvedBranchFrom: string | undefined = undefined;
+                if ((config.studyCondition ?? 'default') === 'analyst' && lastAgentBranchFrom) {
+                    const wanted = lastAgentBranchFrom.replace(/\.[^/.]+$/, "");
+                    const match = [...tables, ...createdTables].find(t2 => {
+                        // Mirror the input_tables resolver above: strip once per side.
+                        const name = t2.virtual?.tableId || t2.id.replace(/\.[^/.]+$/, "");
+                        return name === wanted;
+                    });
+                    if (match) {
+                        resolvedBranchFrom = match.id;
+                    } else {
+                        console.warn(`[analyst branch] branch_from '${lastAgentBranchFrom}' did not resolve; continuing the current thread`);
+                    }
+                }
+                const triggerTableId = resolvedBranchFrom || lastCreatedTableId || focusedTableId!;
 
                 const candidateTable = createDictTable(candidateTableId, rows, undefined);
                 // Resolve source tables from agent's input_tables (names it chose to use)
@@ -1073,6 +1100,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 };
                 lastAgentDisplayInstruction = null;
                 lastAgentInputTables = [];
+                lastAgentBranchFrom = null;
                 thinkingSteps = []; // reset for next chart
                 pendingThought = ''; // reset for next chart
                 if (transformedData.virtual) {

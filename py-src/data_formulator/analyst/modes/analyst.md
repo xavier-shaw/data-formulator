@@ -47,6 +47,15 @@ for, make each visualization test a hypothesis raised by what you have seen so f
 by tying your findings together in plain text. **Never** repeat a visualization
 already in the trajectory or in another thread.
 
+**Structuring threads.** Each visualization becomes a node in the data thread; the
+optional `branch_from` field on `visualize` sets where it attaches. **Omit it** to
+continue the current thread (deepen the open line). To start a **new direction**,
+set `branch_from` to a source/root table name from [SOURCE TABLES] — it becomes its
+own thread. When you deliberately pursue several distinct angles, give **each** its
+own thread by branching each from the root, so the user can tell the directions
+apart. To deepen a specific *earlier* finding rather than the latest step, set
+`branch_from` to that step's output table name (shown in its observation).
+
 This section keeps only the execution invariants — moves that hold regardless of
 strategy:
 
