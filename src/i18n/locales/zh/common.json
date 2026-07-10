@@ -119,6 +119,19 @@
     "studyModeExecutor": "执行者",
     "studyModeAnalyst": "分析师"
   },
+  "analysisGraph": {
+    "title": "分析图",
+    "openTooltip": "分析图——以分析状态查看本次会话",
+    "statesOfCharts": "{{charts}} 个图表 → {{states}} 个状态",
+    "depth": "深度 {{depth}}",
+    "breadth": "广度 {{breadth}}",
+    "aspect": "宽深比 {{ratio}}",
+    "coverage": "覆盖 {{used}}/{{total}} 个属性",
+    "nodeSub": "{{charts}} 个图表 · L{{level}}",
+    "attributesHeading": "按分析状态数排序的属性",
+    "selectHint": "点击状态查看其图表。",
+    "clickChartHint": "点击图表在画布中打开。"
+  },
   "landing": {
     "tagline": "用 AI Agent 驱动可视化探索数据。",
     "demos": "示例",
@@ -871,6 +884,7 @@
     "knowledge": "知识库",
     "metadataPartial": "元数据不完整",
     "metadataUnavailable": "元数据不可用",
+    "largeTableChatPrompt": "我想从“{{connector}}”加载以下表：{{tables}}。这些表太大，无法完整导入：{{large}}。请帮我加载经过筛选、抽样或聚合的子集，而不是整张表。",
     "saving": "保存中...",
     "rename": "重命名",
     "exportSession": "导出",

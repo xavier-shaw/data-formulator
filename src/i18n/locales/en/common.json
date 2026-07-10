@@ -119,6 +119,19 @@
     "studyModeExecutor": "Executor",
     "studyModeAnalyst": "Analyst"
   },
+  "analysisGraph": {
+    "title": "Analysis graph",
+    "openTooltip": "Analysis graph — the session as analysis states",
+    "statesOfCharts": "{{states}} states from {{charts}} charts",
+    "depth": "depth {{depth}}",
+    "breadth": "breadth {{breadth}}",
+    "aspect": "aspect {{ratio}}",
+    "coverage": "{{used}}/{{total}} attributes",
+    "nodeSub": "{{charts}} charts · L{{level}}",
+    "attributesHeading": "Attributes by states analyzed",
+    "selectHint": "Click a state to see its charts.",
+    "clickChartHint": "Click a chart to open it on the canvas."
+  },
   "landing": {
     "tagline": "Explore data with visualizations, powered by AI agents.",
     "demos": "Demos",
