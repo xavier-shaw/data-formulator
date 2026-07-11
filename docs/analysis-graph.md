@@ -1,74 +1,67 @@
-# Analysis Graph — a second modality over the session
+# Analysis Tree — the session as a search tree (Battle & Heer)
 
-The **data thread** is user-centered: a linear, temporal history of what the user
-chose to create, for navigation. The **analysis graph** is analysis-centered: an
-order-free, structural view of *what was explored*, built from the same source
-state. It answers "how deep did each line of inquiry go, how broad was the
-exploration, what was the thematic anchor" — the post-analysis questions.
+The **data thread** is user-centered: a linear, temporal history of what the
+user chose to create, for navigation. The **analysis tree** is
+analysis-centered: the structure of the exploration itself, built from the same
+source state. It is a faithful reproduction of the analysis graphs in Battle &
+Heer 2019, *Characterizing Exploratory Visual Analysis* (§6), with states after
+Wongsuphasawat et al.
 
-Grounding: Battle & Heer 2019, *Characterizing Exploratory Visual Analysis*
-(§6.1), after Wongsuphasawat et al.: "an analysis state is the set of attributes
-currently being analyzed, for which a user may specify visual encodings, apply
-filters, or group and aggregate the data." Heer et al. 2008 (*Graphical
-Histories*) supplies the underlying states-and-transitions model.
+## Model
 
-## Node = attribute-set state
+- **Node = analysis state** = the set of attributes currently being analyzed.
+  In DF, a chart realizes a state: the set of RAW source attributes it analyzes
+  — encoded fields that are raw columns, plus raw columns referenced (as quoted
+  identifiers) in the backing table's derivation code, recursively through
+  derived parents. Charts with equal attribute sets merge into one state
+  (13 thread steps → 10 states in the FAA example).
+- **The session is a sequence of state visits** (charts ordered by creation
+  time). Consecutive visits type the raw transitions:
+  - same set → **self-loop** (iterating in place — effort);
+  - attributes added → **forward** (deepening the current thread);
+  - attributes removed → **backward** (backtracking);
+  - wholesale replacement → **pivot** (implicit backtrack + branch).
+- **Search tree** = strip backward edges and self-loops; rooted at the dataset.
+  DF adaptation for pivots (Tableau edits shelves incrementally; DF jumps
+  between ready-made charts): a first-seen state attaches under the **largest
+  previously-visited subset** of it, the root when none exists. No states are
+  invented.
 
-A node is a distinct set of **raw source-dataset attributes** analyzed. DF
-charts mostly encode derived measure columns with per-table names
-(`serious_damage_rate`), so each chart is resolved to raw attributes by:
+## Metric semantics (B&H §6.2 — tree shape, not naive unique-state counts)
 
-1. encoded fields that are raw columns, plus
-2. raw columns referenced (as quoted identifiers) in the backing table's
-   `derive.code`, recursively through derived parents — the DF analog of
-   Tableau's encoding + filter shelves.
-
-Charts with equal attribute sets merge into one state (dedup is the point:
-13 thread steps → 10 states in the FAA example). Derived measures, chart types,
-aggregations, timestamps, and engagement are node *properties*, not identity.
-
-## Edges = purely structural, no behavioral meaning
-
-- **refinement** (solid, directed): A → B iff attrs(A) ⊂ attrs(B) with no
-  observed intermediate — the Hasse diagram of containment. The structural twin
-  of Battle & Heer's temporal "added an attribute" edge.
-- **overlap** (dashed): a maximum-spanning-forest over Jaccard similarity
-  (≥ 0.2) between nodes not already connected via containment. Connects
-  thematic hubs (e.g. seven states sharing DAMAGE_LEVEL) without a similarity
-  hairball. Which specific pairs are drawn is a spanning-forest choice; the
-  per-component **anchor attributes** (present in ≥ 60% of a component's nodes)
-  are the meaningful unit and are rendered as a hull.
-
-Time is a node property (first/last realization), never an edge — ordering
-belongs to the thread. Engagement (dwell/visits/edits from the study build's
-`studyTelemetry`) is an optional overlay.
-
-## Metrics
-
-- `stateCount`, `componentCount`, `leafCount`, `attributeCoverage` — breadth
-- `maxDepth` (longest containment chain), `deepestChain`, per-attribute depth — depth & its direction
-- `maxBreadth` (widest depth level), `aspectRatio = maxBreadth / maxDepth` —
-  Battle & Heer's structural signature (<1 depth-oriented; Tableau EVA was
-  depth-oriented; the FAA Analyst-condition example scores 4.0, breadth-oriented)
-- `attributeStats` — states/charts/depth per attribute (the "what was the
-  analysis about" readout)
+- **Depth = commitment to one thread**: tree height; per-trajectory effort =
+  visits (incl. self-loops) along the root→leaf path. Greater depth = less
+  backtracking, the analyst keeps building on the current state.
+- **Breadth = number of distinct trajectories**: each leaf is a separate
+  subtask, born from backtracking to an earlier state and striking off anew.
+- **Aspect ratio = max width / height** (B&H's structural signature; < 1 =
+  depth-oriented — their Tableau finding; the FAA Analyst-condition example
+  scores 4.0, breadth-oriented).
+- **Self-loops mark key states** ("indicators of significant analysis states")
+  — in the FAA example they fall exactly on the two deepened threads' states.
+- Also reported: revisited states (non-consecutive returns), attribute coverage.
 
 ## Files
 
-- `src/app/analysisGraph.ts` — pure builder (`buildAnalysisGraph`), unit-tested
+- `src/app/analysisGraph.ts` — pure builder (`buildAnalysisTree`), unit-tested
   in `tests/frontend/unit/app/analysisGraph.test.ts`
-- `src/views/AnalysisGraphView.tsx` — in-app dialog (hub-and-chains layout,
-  anchor hulls, click-through to canvas), opened from the thread pane's ⬡ button
+- `src/views/AnalysisGraphView.tsx` — in-app dialog (tidy tree, depth vertical /
+  breadth horizontal, ↻ self-loop badges, trajectory panel, click-through to
+  canvas), opened from the thread pane's tree button
 - Example: `py-src/data_formulator/example_analysis/Nic- FAA Wildlife Strikes.zip`
-  → 13 charts, 10 states, DAMAGE_LEVEL hub ×7, two refinement chains
-  ({AIRPORT}→{AIRPORT,SPECIES}, {PHASE_OF_FLIGHT}→{DAMAGE_LEVEL,PHASE_OF_FLIGHT})
+  → 13 charts, 10 states, height 2, 8 trajectories, aspect 4.0, 3 self-loops;
+  effort concentrates on {AIRPORT}→{AIRPORT,SPECIES} and
+  {PHASE_OF_FLIGHT}→{DAMAGE_LEVEL,PHASE_OF_FLIGHT}
 
 ## Known limits / choices
 
-- Code-scan canonicalization treats every referenced raw column as "analyzed"
-  (filters count as analysis — consistent with the B&H definition); columns
-  touched only for cleanup inflate a state's set slightly.
-- No undo/branch history exists in DF, so branching comes from the structure
-  itself (multiple supersets of one state), not from history manipulation.
-- State grain is the pure attribute set; if a session over-merges (same fields,
-  meaningfully different aggregation), extend the signature with aggregation ops.
+- Visits are chart creations; state grain is the pure attribute set (extend the
+  signature with aggregation ops if a session over-merges).
+- Code-scan canonicalization counts every referenced raw column as "analyzed"
+  (filters count, consistent with the state definition).
+- Engagement (dwell/edits from the study build's `studyTelemetry`) is an
+  optional node overlay; absent on non-study branches.
+- In agent-driven DF sessions most transitions are pivots (no incremental
+  shelf edits), so tree structure comes from pivots landing on extensions of
+  earlier states — report transition-type counts alongside the tree when
+  comparing to Tableau numbers.

@@ -1,32 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// Analysis graph — a structural, analysis-centered representation of a session,
-// complementary to the (user-centered, temporal) data thread. Both are derived
-// from the same source state; this one answers "what was explored, how deep,
-// how broad" rather than "what did the user do, in order".
+// Analysis tree — a faithful reproduction of Battle & Heer's analysis graphs
+// (Characterizing Exploratory Visual Analysis, EuroVis 2019, §6), complementary
+// to the data thread: the thread is what the user chose to create, in order;
+// the tree is the structure of the exploration itself.
 //
-// Model (Battle & Heer 2019 §6.1, after Wongsuphasawat et al.):
-//   "an analysis state is the set of attributes currently being analyzed, for
-//    which a user may specify visual encodings, apply filters, or group and
-//    aggregate the data."
+// Model:
+// - A node is an ANALYSIS STATE = the set of attributes currently being
+//   analyzed (Wongsuphasawat et al.). In DF, a chart realizes a state; the
+//   state is the set of RAW source attributes the chart analyzes (encoded raw
+//   fields + raw columns referenced by the backing table's derivation code).
+// - The session is a SEQUENCE of state visits (charts ordered by creation
+//   time). Consecutive visits produce the raw transitions:
+//     same set            → self-loop      (iterating in place — effort)
+//     superset (added)    → forward edge   (deepening the current thread)
+//     subset (removed)    → backward edge  (backtracking)
+//     disjoint pivot      → implicit backtrack + branch: the new state
+//                           attaches under the largest previously-VISITED
+//                           subset of it (the dataset root when none exists).
+// - Strip backward edges and self-loops → the SEARCH TREE, rooted at the
+//   dataset. Paths are the analyst's exploratory trajectories.
 //
-// Nodes: distinct RAW-attribute sets. DF charts mostly encode derived measure
-// columns with per-table names (e.g. `serious_damage_rate`), so we resolve each
-// chart to the raw source-dataset attributes it analyzes: encoded fields that
-// are raw columns, plus raw columns referenced by the backing table's
-// derivation code (the DF analog of Tableau's encoding+filter shelves).
-//
-// Edges (purely structural — no behavioral/temporal meaning):
-//   - refinement: A → B iff attrs(A) ⊂ attrs(B) with no observed intermediate
-//     (the Hasse diagram of the containment partial order). The structural twin
-//     of Battle & Heer's "added an attribute" forward edge.
-//   - overlap: a maximum-spanning-forest over Jaccard similarity between nodes
-//     not already connected by containment. Keeps thematic hubs (e.g. seven
-//     states sharing DAMAGE_LEVEL) connected without a similarity hairball.
-//
-// Time and engagement are node PROPERTIES (overlays), never edges — the thread
-// owns ordering; this graph stays order-free.
+// Metric semantics (Battle & Heer §6.2, replacing naive unique-state counts):
+// - DEPTH = commitment to one thread: how far a line of inquiry is pushed
+//   without backtracking (tree height; per-trajectory visit counts = effort).
+// - BREADTH = number of distinct trajectories: each leaf is a separate
+//   subtask, born from backtracking to an earlier state and striking off anew.
+// - Self-loops mark states receiving extra iteration — effort landmarks.
 
 import { Chart, DictTable, FieldItem } from '../components/ComponentType';
 
@@ -38,10 +39,6 @@ export interface TelemetryLike {
     focusEvents: { f: { type: string; chartId?: string } | null; t: number; visible: boolean }[];
     interactionEvents: { action: string; chartId?: string; t: number }[];
 }
-
-// ─── tunables ────────────────────────────────────────────────────────────────
-export const OVERLAP_JACCARD_MIN = 0.2;   // overlap edges below this are never drawn
-export const ANCHOR_ATTR_SHARE = 0.6;     // attr present in ≥ this share of a component's nodes = anchor
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -55,66 +52,59 @@ export interface StateChartRef {
 }
 
 export interface AnalysisStateNode {
-    id: string;                // canonical: sorted attributes joined with '␟'
-    attributes: string[];      // sorted canonical raw-attribute names
-    charts: StateChartRef[];
-    tableIds: string[];
-    tFirst: number | null;     // earliest chart realization
-    tLast: number | null;
-    depthLevel: number;        // longest containment chain ending at this node (1-based)
-    componentId: number;
+    id: string;                // canonical: sorted attributes joined with '␟'; '' = root
+    attributes: string[];      // sorted canonical raw-attribute names ([] = root)
+    charts: StateChartRef[];   // chart realizations of this state (root: none)
+    parentId: string | null;   // search-tree parent (null = root)
+    depth: number;             // root = 0
+    visits: number;            // times this state appears in the visit sequence
+    selfLoops: number;         // consecutive re-visits (iteration in place)
+    revisits: number;          // non-consecutive returns (backtracked to later)
+    tFirst: number | null;
     engagement?: { dwellMs: number; visits: number; edits: number };
 }
 
-export type AnalysisEdgeKind = 'refinement' | 'overlap';
+export type TransitionKind = 'forward' | 'backward' | 'self-loop' | 'pivot';
 
-export interface AnalysisGraphEdge {
-    source: string;            // node id (for refinement: the smaller set)
-    target: string;
-    kind: AnalysisEdgeKind;
-    /** overlap only: Jaccard similarity of the two attribute sets */
-    jaccard?: number;
-    /** overlap only: the shared attributes */
-    shared?: string[];
+/** One consecutive step in the visit sequence (the raw graph's edges). */
+export interface AnalysisTransition {
+    from: string;              // state id
+    to: string;
+    kind: TransitionKind;
 }
 
-export interface AttributeStat {
-    name: string;
-    states: number;            // # states containing it
-    charts: number;            // # charts analyzing it
-    maxDepth: number;          // deepest containment chain among states containing it
+export interface AnalysisTrajectory {
+    leafId: string;
+    stateIds: string[];        // root → leaf path (root excluded)
+    totalVisits: number;       // effort: visits (incl. self-loops) along the path
 }
 
-export interface AnalysisComponentInfo {
-    id: number;
-    nodeIds: string[];
-    anchorAttributes: string[];  // attributes shared by most of the component
-}
-
-export interface AnalysisGraphMetrics {
+export interface AnalysisTreeMetrics {
     chartCount: number;
-    stateCount: number;          // breadth: distinct states explored
-    componentCount: number;      // breadth: separate lines of inquiry
-    leafCount: number;           // maximal states (no observed superset)
-    maxDepth: number;            // longest containment chain (nodes)
-    maxBreadth: number;          // widest depth-level (states at one level)
-    aspectRatio: number | null;  // maxBreadth / maxDepth (B&H: <1 = depth-oriented)
+    stateCount: number;            // unique states (root excluded)
+    height: number;                // max depth — DEPTH: commitment to one thread
+    leafCount: number;             // trajectories — BREADTH: distinct threads
+    maxWidth: number;              // widest depth level
+    aspectRatio: number | null;    // maxWidth / height (B&H: <1 depth-oriented)
+    totalSelfLoops: number;
+    selfLoopStates: number;        // states iterated in place (effort landmarks)
+    revisitedStates: number;       // states returned to after leaving
     attributeCoverage: { used: number; total: number };
-    attributeStats: AttributeStat[];    // sorted by states desc
-    deepestChain: string[];      // node ids along one longest chain
+    trajectories: AnalysisTrajectory[];   // sorted by totalVisits desc
 }
 
-export interface AnalysisGraph {
-    nodes: AnalysisStateNode[];
-    edges: AnalysisGraphEdge[];
-    components: AnalysisComponentInfo[];
-    metrics: AnalysisGraphMetrics;
-    universe: string[];          // all raw attributes available in the session
+export interface AnalysisTree {
+    root: AnalysisStateNode;
+    nodes: AnalysisStateNode[];    // excludes root; stable order (first visit)
+    transitions: AnalysisTransition[];   // the raw graph, in sequence order
+    metrics: AnalysisTreeMetrics;
+    universe: string[];
 }
 
 export const STATE_ID_SEP = '␟';
+export const ROOT_ID = '';
 
-// ─── canonicalization ────────────────────────────────────────────────────────
+// ─── canonicalization (chart → raw-attribute state) ─────────────────────────
 
 /** Quoted identifiers in derivation code — candidate raw-column references. */
 const QUOTED_IDENT = /['"]([A-Za-z0-9_][A-Za-z0-9_ .\-]*)['"]/g;
@@ -133,8 +123,7 @@ const decodeChartTime = (chart: Chart, table: DictTable | undefined): number | n
 /**
  * Resolve the raw attributes a derived table analyzes: quoted identifiers in
  * its code that name raw-universe columns, recursively unioned with the raw
- * attributes of derived parents (a step that reads a parent's output analyzes
- * whatever that parent analyzed).
+ * attributes of derived parents.
  */
 const rawAttrsOfTable = (
     tableId: string,
@@ -192,15 +181,10 @@ export const chartAttributeSet = (
     return { attrs, encodedFields };
 };
 
-// ─── graph construction ──────────────────────────────────────────────────────
+// ─── construction ────────────────────────────────────────────────────────────
 
-const isSubset = (a: string[], b: Set<string>): boolean => a.every(x => b.has(x));
-
-const jaccard = (a: Set<string>, b: Set<string>): { j: number; shared: string[] } => {
-    const shared = [...a].filter(x => b.has(x));
-    const union = a.size + b.size - shared.length;
-    return { j: union === 0 ? 0 : shared.length / union, shared };
-};
+const isProperSubset = (a: string[], b: Set<string>): boolean =>
+    a.length < b.size && a.every(x => b.has(x));
 
 const chartEngagement = (telemetry: TelemetryLike | undefined, chartIds: string[]) => {
     if (!telemetry) return undefined;
@@ -222,12 +206,12 @@ const chartEngagement = (telemetry: TelemetryLike | undefined, chartIds: string[
     return { dwellMs, visits, edits };
 };
 
-export const buildAnalysisGraph = (
+export const buildAnalysisTree = (
     charts: Chart[],
     tables: DictTable[],
     conceptShelfItems: FieldItem[],
     telemetry?: TelemetryLike,
-): AnalysisGraph => {
+): AnalysisTree => {
     const tablesById = new Map(tables.map(t => [t.id, t]));
     const fieldsById = new Map(conceptShelfItems.map(f => [f.id, f]));
 
@@ -237,174 +221,141 @@ export const buildAnalysisGraph = (
         if (!t.derive) for (const n of t.names || []) universe.add(n);
     }
 
-    // 1. Canonicalize each chart to an attribute set; group into state nodes.
+    // 1. The visit sequence: charts ordered by creation time (charts without a
+    //    recoverable time keep their array order, after the timed ones).
     const memo = new Map<string, Set<string>>();
-    const bySignature = new Map<string, { attrs: string[]; attrSet: Set<string>; charts: StateChartRef[]; tableIds: Set<string> }>();
-    let chartCount = 0;
+    const visits: { id: string; attrs: string[]; ref: StateChartRef }[] = [];
     for (const chart of charts) {
         if ((chart.source ?? 'user') !== 'user') continue;
         const { attrs, encodedFields } = chartAttributeSet(chart, tablesById, fieldsById, universe, memo);
-        if (attrs.size === 0) continue;   // blank chart, no state
-        chartCount++;
+        if (attrs.size === 0) continue;
         const sorted = [...attrs].sort();
-        const id = sorted.join(STATE_ID_SEP);
-        let entry = bySignature.get(id);
-        if (!entry) {
-            entry = { attrs: sorted, attrSet: new Set(sorted), charts: [], tableIds: new Set() };
-            bySignature.set(id, entry);
-        }
-        entry.charts.push({
-            chartId: chart.id,
-            chartType: chart.chartType,
-            title: chart.title,
-            tableId: chart.tableRef,
-            encodedFields,
-            tFirst: decodeChartTime(chart, tablesById.get(chart.tableRef)),
+        visits.push({
+            id: sorted.join(STATE_ID_SEP),
+            attrs: sorted,
+            ref: {
+                chartId: chart.id,
+                chartType: chart.chartType,
+                title: chart.title,
+                tableId: chart.tableRef,
+                encodedFields,
+                tFirst: decodeChartTime(chart, tablesById.get(chart.tableRef)),
+            },
         });
-        entry.tableIds.add(chart.tableRef);
     }
+    visits.sort((a, b) => (a.ref.tFirst ?? Number.MAX_SAFE_INTEGER) - (b.ref.tFirst ?? Number.MAX_SAFE_INTEGER));
 
-    const nodes: AnalysisStateNode[] = [...bySignature.entries()].map(([id, e]) => {
-        const times = e.charts.map(c => c.tFirst).filter((t): t is number => t !== null);
-        return {
-            id,
-            attributes: e.attrs,
-            charts: e.charts,
-            tableIds: [...e.tableIds],
-            tFirst: times.length ? Math.min(...times) : null,
-            tLast: times.length ? Math.max(...times) : null,
-            depthLevel: 1,
-            componentId: -1,
-            engagement: chartEngagement(telemetry, e.charts.map(c => c.chartId)),
-        };
-    }).sort((a, b) => a.id.localeCompare(b.id));
-
-    const nodeById = new Map(nodes.map(n => [n.id, n]));
-    const attrSets = new Map(nodes.map(n => [n.id, new Set(n.attributes)]));
-
-    // 2. Refinement edges: Hasse diagram of the ⊂ partial order.
-    const properSubset = (a: AnalysisStateNode, b: AnalysisStateNode) =>
-        a.attributes.length < b.attributes.length && isSubset(a.attributes, attrSets.get(b.id)!);
-    const edges: AnalysisGraphEdge[] = [];
-    for (const a of nodes) {
-        for (const b of nodes) {
-            if (!properSubset(a, b)) continue;
-            // immediate cover: no observed c with a ⊂ c ⊂ b
-            const hasIntermediate = nodes.some(c =>
-                c.id !== a.id && c.id !== b.id && properSubset(a, c) && properSubset(c, b));
-            if (!hasIntermediate) edges.push({ source: a.id, target: b.id, kind: 'refinement' });
-        }
-    }
-
-    // 3. Overlap edges: maximum-spanning-forest over Jaccard between nodes not
-    //    already connected via containment (in either direction, transitively).
-    //    Union-find over refinement edges first, then greedily add best overlaps.
-    const parent = new Map(nodes.map(n => [n.id, n.id]));
-    const find = (x: string): string => {
-        let r = x;
-        while (parent.get(r) !== r) r = parent.get(r)!;
-        parent.set(x, r);
-        return r;
+    // 2. Walk the sequence: dedupe states, type each consecutive transition,
+    //    and attach first-seen states to the search tree.
+    const root: AnalysisStateNode = {
+        id: ROOT_ID, attributes: [], charts: [], parentId: null,
+        depth: 0, visits: 0, selfLoops: 0, revisits: 0, tFirst: null,
     };
-    const union = (x: string, y: string) => { parent.set(find(x), find(y)); };
-    for (const e of edges) union(e.source, e.target);
+    const nodesById = new Map<string, AnalysisStateNode>();
+    const transitions: AnalysisTransition[] = [];
+    let prevId: string | null = null;
 
-    const candidates: { a: string; b: string; j: number; shared: string[] }[] = [];
-    for (let i = 0; i < nodes.length; i++) {
-        for (let k = i + 1; k < nodes.length; k++) {
-            const { j, shared } = jaccard(attrSets.get(nodes[i].id)!, attrSets.get(nodes[k].id)!);
-            if (j >= OVERLAP_JACCARD_MIN && shared.length > 0) {
-                candidates.push({ a: nodes[i].id, b: nodes[k].id, j, shared });
+    /** Search-tree parent for a newly seen state: the largest already-visited
+     *  proper subset of it (most recently visited on ties); the root if none.
+     *  This is B&H branching adapted to DF's non-incremental jumps: pivoting
+     *  to a state that extends an earlier one = backtracking there + adding. */
+    const attachParent = (attrs: string[]): AnalysisStateNode => {
+        let best: AnalysisStateNode | null = null;
+        const attrSet = new Set(attrs);
+        for (const cand of nodesById.values()) {
+            if (!isProperSubset(cand.attributes, attrSet)) continue;
+            if (!best
+                || cand.attributes.length > best.attributes.length
+                || (cand.attributes.length === best.attributes.length && (cand.tFirst ?? 0) > (best.tFirst ?? 0))) {
+                best = cand;
             }
         }
-    }
-    candidates.sort((x, y) => y.j - x.j || x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
-    for (const c of candidates) {
-        if (find(c.a) !== find(c.b)) {
-            union(c.a, c.b);
-            edges.push({ source: c.a, target: c.b, kind: 'overlap', jaccard: c.j, shared: c.shared });
-        }
-    }
-
-    // 4. Components (over all edges).
-    const componentRoots = new Map<string, number>();
-    let componentCount = 0;
-    for (const n of nodes) {
-        const root = find(n.id);
-        if (!componentRoots.has(root)) componentRoots.set(root, componentCount++);
-        n.componentId = componentRoots.get(root)!;
-    }
-    const components: AnalysisComponentInfo[] = [...componentRoots.values()].map(id => {
-        const nodeIds = nodes.filter(n => n.componentId === id).map(n => n.id);
-        const counts = new Map<string, number>();
-        for (const nid of nodeIds) {
-            for (const a of nodeById.get(nid)!.attributes) counts.set(a, (counts.get(a) || 0) + 1);
-        }
-        const anchorAttributes = [...counts.entries()]
-            .filter(([, c]) => c >= Math.max(2, Math.ceil(nodeIds.length * ANCHOR_ATTR_SHARE)))
-            .sort((x, y) => y[1] - x[1])
-            .map(([a]) => a);
-        return { id, nodeIds, anchorAttributes };
-    }).sort((a, b) => a.id - b.id);
-
-    // 5. Depth levels: longest containment chain ending at each node (DAG DP).
-    const refinementIn = new Map<string, string[]>();
-    for (const e of edges) {
-        if (e.kind !== 'refinement') continue;
-        if (!refinementIn.has(e.target)) refinementIn.set(e.target, []);
-        refinementIn.get(e.target)!.push(e.source);
-    }
-    const ordered = [...nodes].sort((a, b) => a.attributes.length - b.attributes.length);
-    const chainPrev = new Map<string, string | null>();
-    for (const n of ordered) {
-        let best = 1, prev: string | null = null;
-        for (const p of refinementIn.get(n.id) || []) {
-            const cand = nodeById.get(p)!.depthLevel + 1;
-            if (cand > best) { best = cand; prev = p; }
-        }
-        n.depthLevel = best;
-        chainPrev.set(n.id, prev);
-    }
-
-    // 6. Metrics.
-    const maxDepth = nodes.length ? Math.max(...nodes.map(n => n.depthLevel)) : 0;
-    const levelWidths = new Map<number, number>();
-    for (const n of nodes) levelWidths.set(n.depthLevel, (levelWidths.get(n.depthLevel) || 0) + 1);
-    const maxBreadth = nodes.length ? Math.max(...levelWidths.values()) : 0;
-
-    const hasSuperset = new Set(edges.filter(e => e.kind === 'refinement').map(e => e.source));
-    const leafCount = nodes.filter(n => !hasSuperset.has(n.id)).length;
-
-    const deepestChain: string[] = [];
-    const deepest = nodes.reduce<AnalysisStateNode | null>(
-        (acc, n) => (acc === null || n.depthLevel > acc.depthLevel ? n : acc), null);
-    for (let cur: string | null = deepest?.id ?? null; cur; cur = chainPrev.get(cur) ?? null) {
-        deepestChain.unshift(cur);
-    }
-
-    const attrStats = new Map<string, AttributeStat>();
-    for (const n of nodes) {
-        for (const a of n.attributes) {
-            const s = attrStats.get(a) || { name: a, states: 0, charts: 0, maxDepth: 0 };
-            s.states++;
-            s.charts += n.charts.length;
-            s.maxDepth = Math.max(s.maxDepth, n.depthLevel);
-            attrStats.set(a, s);
-        }
-    }
-
-    const metrics: AnalysisGraphMetrics = {
-        chartCount,
-        stateCount: nodes.length,
-        componentCount,
-        leafCount,
-        maxDepth,
-        maxBreadth,
-        aspectRatio: maxDepth > 0 ? maxBreadth / maxDepth : null,
-        attributeCoverage: { used: attrStats.size, total: universe.size || attrStats.size },
-        attributeStats: [...attrStats.values()].sort((a, b) => b.states - a.states || a.name.localeCompare(b.name)),
-        deepestChain,
+        return best ?? root;
     };
 
-    return { nodes, edges, components, metrics, universe: [...universe].sort() };
+    for (const v of visits) {
+        let node = nodesById.get(v.id);
+        const isNew = !node;
+        if (!node) {
+            const parent = attachParent(v.attrs);
+            node = {
+                id: v.id, attributes: v.attrs, charts: [], parentId: parent.id,
+                depth: parent.depth + 1, visits: 0, selfLoops: 0, revisits: 0,
+                tFirst: v.ref.tFirst,
+            };
+            nodesById.set(v.id, node);
+        }
+        node.charts.push(v.ref);
+        node.visits++;
+
+        if (prevId !== null) {
+            const prev = nodesById.get(prevId)!;
+            let kind: TransitionKind;
+            if (prevId === v.id) {
+                kind = 'self-loop';
+                node.selfLoops++;
+            } else if (isProperSubset(prev.attributes, new Set(v.attrs))) {
+                kind = 'forward';
+            } else if (isProperSubset(v.attrs, new Set(prev.attributes))) {
+                kind = 'backward';
+            } else {
+                kind = 'pivot';
+            }
+            transitions.push({ from: prevId, to: v.id, kind });
+            if (!isNew && prevId !== v.id) node.revisits++;
+        }
+        prevId = v.id;
+    }
+
+    const nodes = [...nodesById.values()];
+    for (const n of nodes) {
+        n.engagement = chartEngagement(telemetry, n.charts.map(c => c.chartId));
+    }
+
+    // 3. Metrics (B&H tree-shape semantics).
+    const childCount = new Map<string, number>();
+    for (const n of nodes) {
+        childCount.set(n.parentId!, (childCount.get(n.parentId!) || 0) + 1);
+    }
+    const leaves = nodes.filter(n => !childCount.has(n.id));
+    const height = nodes.length ? Math.max(...nodes.map(n => n.depth)) : 0;
+    const widthByDepth = new Map<number, number>();
+    for (const n of nodes) widthByDepth.set(n.depth, (widthByDepth.get(n.depth) || 0) + 1);
+    const maxWidth = nodes.length ? Math.max(...widthByDepth.values()) : 0;
+
+    const pathOf = (leaf: AnalysisStateNode): string[] => {
+        const path: string[] = [];
+        for (let cur: AnalysisStateNode | undefined = leaf; cur && cur.id !== ROOT_ID;
+            cur = nodesById.get(cur.parentId!)) {
+            path.unshift(cur.id);
+        }
+        return path;
+    };
+    const trajectories: AnalysisTrajectory[] = leaves.map(leaf => {
+        const stateIds = pathOf(leaf);
+        return {
+            leafId: leaf.id,
+            stateIds,
+            totalVisits: stateIds.reduce((s, id) => s + (nodesById.get(id)?.visits ?? 0), 0),
+        };
+    }).sort((a, b) => b.totalVisits - a.totalVisits || a.leafId.localeCompare(b.leafId));
+
+    const usedAttrs = new Set<string>();
+    for (const n of nodes) for (const a of n.attributes) usedAttrs.add(a);
+
+    const metrics: AnalysisTreeMetrics = {
+        chartCount: visits.length,
+        stateCount: nodes.length,
+        height,
+        leafCount: leaves.length,
+        maxWidth,
+        aspectRatio: height > 0 ? maxWidth / height : null,
+        totalSelfLoops: nodes.reduce((s, n) => s + n.selfLoops, 0),
+        selfLoopStates: nodes.filter(n => n.selfLoops > 0).length,
+        revisitedStates: nodes.filter(n => n.revisits > 0).length,
+        attributeCoverage: { used: usedAttrs.size, total: universe.size || usedAttrs.size },
+        trajectories,
+    };
+
+    return { root, nodes, transitions, metrics, universe: [...universe].sort() };
 };
