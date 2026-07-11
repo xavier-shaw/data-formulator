@@ -20,73 +20,121 @@ import {
     AnalysisGraph, AnalysisStateNode, TelemetryLike, buildAnalysisGraph,
 } from '../app/analysisGraph';
 
-const NW = 172, NH = 54, GX = 210, GY = 104, HUB_COLS = 3, PAD = 36;
+const NW = 172, NH = 54, GX = 210, GY = 118, PAD = 36;
 
 interface LaidOutNode { node: AnalysisStateNode; x: number; y: number; }
 
-/** Deterministic layout: per component, anchor-hub grid on the right, chain
- *  nodes in depth-level columns on the left; components stack vertically. */
+/**
+ * Deterministic layered layout with DEPTH VERTICAL (level 1 on top, deeper
+ * states below) and BREADTH HORIZONTAL — the picture is literally the
+ * breadth/depth aspect ratio, matching how Battle & Heer draw search trees.
+ *
+ * Per component (components sit side by side): each depth level is a row.
+ * Within a row, non-anchor nodes sit on the left and anchor-theme nodes in a
+ * right-aligned band whose x-start is shared across rows, so the anchor hull
+ * is a tight box. Nodes at level ≥ 2 are ordered by the mean x of their
+ * refinement parents (barycenter) to keep arrows near-vertical.
+ */
 const layoutGraph = (graph: AnalysisGraph): { placed: LaidOutNode[]; hulls: { x: number; y: number; w: number; h: number; label: string }[]; width: number; height: number } => {
     const placed: LaidOutNode[] = [];
     const hulls: { x: number; y: number; w: number; h: number; label: string }[] = [];
-    let yOffset = PAD;
-    let maxX = 640;
+    const posById = new Map<string, LaidOutNode>();
+    const parentsOf = new Map<string, string[]>();
+    for (const e of graph.edges) {
+        if (e.kind !== 'refinement') continue;
+        if (!parentsOf.has(e.target)) parentsOf.set(e.target, []);
+        parentsOf.get(e.target)!.push(e.source);
+    }
+
+    let xOffset = PAD;
+    let maxY = 0;
 
     for (const comp of graph.components) {
         const nodes = comp.nodeIds
             .map(id => graph.nodes.find(n => n.id === id)!)
             .filter(Boolean);
         const anchor = comp.anchorAttributes[0];
-        const hub = anchor ? nodes.filter(n => n.attributes.includes(anchor)) : [];
-        const rest = nodes.filter(n => !hub.includes(n));
+        const isAnchorNode = (n: AnalysisStateNode) => !!anchor && n.attributes.includes(anchor);
 
-        // chains: columns by depth level
-        const restByLevel = new Map<number, AnalysisStateNode[]>();
-        for (const n of rest) {
-            if (!restByLevel.has(n.depthLevel)) restByLevel.set(n.depthLevel, []);
-            restByLevel.get(n.depthLevel)!.push(n);
+        const byLevel = new Map<number, AnalysisStateNode[]>();
+        for (const n of nodes) {
+            if (!byLevel.has(n.depthLevel)) byLevel.set(n.depthLevel, []);
+            byLevel.get(n.depthLevel)!.push(n);
         }
-        const chainLevels = [...restByLevel.keys()].sort((a, b) => a - b);
-        let chainMaxRows = 0;
-        chainLevels.forEach((lvl, li) => {
-            const col = restByLevel.get(lvl)!.sort((a, b) => (a.tFirst ?? 0) - (b.tFirst ?? 0));
-            chainMaxRows = Math.max(chainMaxRows, col.length);
-            col.forEach((n, ri) => {
-                placed.push({ node: n, x: PAD + li * GX, y: yOffset + ri * GY + (li * 44) });
-            });
-        });
+        const levels = [...byLevel.keys()].sort((a, b) => a - b);
 
-        // hub grid, right of the chains
-        const hubX = PAD + chainLevels.length * GX + (chainLevels.length ? 60 : 0);
-        if (hub.length > 0) {
-            const sorted = [...hub].sort((a, b) => a.depthLevel - b.depthLevel || a.id.localeCompare(b.id));
-            sorted.forEach((n, i) => {
-                placed.push({ node: n, x: hubX + (i % HUB_COLS) * GX, y: yOffset + Math.floor(i / HUB_COLS) * GY });
-            });
-            const rows = Math.ceil(hub.length / HUB_COLS);
-            const w = Math.min(hub.length, HUB_COLS) * GX - (GX - NW) + 40;
-            hulls.push({
-                x: hubX - 20, y: yOffset - 30,
-                w, h: rows * GY - (GY - NH) + 52,
-                label: `${anchor} · ${hub.length}`,
-            });
-            maxX = Math.max(maxX, hubX - 20 + w + PAD);
+        // shared x-start of the anchor band = widest non-anchor prefix
+        const maxNonAnchor = Math.max(0, ...levels.map(l => byLevel.get(l)!.filter(n => !isAnchorNode(n)).length));
+        const maxAnchor = Math.max(0, ...levels.map(l => byLevel.get(l)!.filter(isAnchorNode).length));
+        const anchorBandX = xOffset + maxNonAnchor * GX + (maxNonAnchor > 0 && maxAnchor > 0 ? 28 : 0);
+
+        // order within a group: barycenter of already-placed parents, then time
+        const orderKey = (n: AnalysisStateNode): number => {
+            const ps = (parentsOf.get(n.id) || []).map(p => posById.get(p)?.x).filter((x): x is number => x !== undefined);
+            if (ps.length) return ps.reduce((a, b) => a + b, 0) / ps.length;
+            return n.tFirst ?? Number.MAX_SAFE_INTEGER;
+        };
+
+        // Greedy placement: a node sits at the mean x of its refinement parents
+        // (barycenter) when that slot is free, so depth chains read as vertical
+        // columns; otherwise it shifts right within its group band.
+        const placeRowGroup = (group: AnalysisStateNode[], startX: number, y: number, out?: LaidOutNode[]) => {
+            let cursor = startX;
+            for (const n of group) {
+                const ps = (parentsOf.get(n.id) || []).map(pid => posById.get(pid)?.x).filter((x): x is number => x !== undefined);
+                const bary = ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : cursor;
+                const x = Math.max(cursor, bary);
+                const p: LaidOutNode = { node: n, x, y };
+                placed.push(p); posById.set(n.id, p); out?.push(p);
+                cursor = x + GX;
+            }
+        };
+        const anchorPlaced: LaidOutNode[] = [];
+        for (const lvl of levels) {
+            const y = PAD + 26 + (lvl - 1) * GY;
+            const row = byLevel.get(lvl)!;
+            placeRowGroup(row.filter(n => !isAnchorNode(n)).sort((a, b) => orderKey(a) - orderKey(b)), xOffset, y);
+            placeRowGroup(row.filter(isAnchorNode).sort((a, b) => orderKey(a) - orderKey(b)), anchorBandX, y, anchorPlaced);
+            maxY = Math.max(maxY, y + NH);
         }
-        const compRows = Math.max(chainMaxRows, Math.ceil(hub.length / HUB_COLS));
-        yOffset += Math.max(1, compRows) * GY + 70;
-        maxX = Math.max(maxX, PAD + (chainLevels.length + 1) * GX);
+
+        if (anchorPlaced.length >= 2) {
+            const hx = Math.min(...anchorPlaced.map(p => p.x)) - 14;
+            const hy = Math.min(...anchorPlaced.map(p => p.y)) - 30;
+            const hx2 = Math.max(...anchorPlaced.map(p => p.x)) + NW + 14;
+            const hy2 = Math.max(...anchorPlaced.map(p => p.y)) + NH + 14;
+            hulls.push({ x: hx, y: hy, w: hx2 - hx, h: hy2 - hy, label: `${anchor} · ${anchorPlaced.length}` });
+        }
+
+        // advance by the ACTUAL extent (greedy barycenter can exceed slot math)
+        const compNodes = nodes.map(n => posById.get(n.id)!).filter(Boolean);
+        const compMaxX = compNodes.length ? Math.max(...compNodes.map(p => p.x + NW)) : xOffset + GX;
+        xOffset = compMaxX + 56;   // next component to the right
     }
-    return { placed, hulls, width: maxX, height: yOffset };
+
+    return { placed, hulls, width: xOffset + PAD, height: maxY + PAD + 20 };
 };
 
 const edgePath = (a: LaidOutNode, b: LaidOutNode): string => {
     const A = { cx: a.x + NW / 2, cy: a.y + NH / 2 };
     const B = { cx: b.x + NW / 2, cy: b.y + NH / 2 };
-    const horizontal = Math.abs(B.cx - A.cx) > Math.abs(B.cy - A.cy);
-    const sx = horizontal ? A.cx + Math.sign(B.cx - A.cx) * NW / 2 : A.cx;
-    const sy = horizontal ? A.cy : A.cy + Math.sign(B.cy - A.cy) * NH / 2;
-    const tx = horizontal ? B.cx - Math.sign(B.cx - A.cx) * (NW / 2 + 4) : B.cx;
-    const ty = horizontal ? B.cy : B.cy - Math.sign(B.cy - A.cy) * (NH / 2 + 4);
+    // Same row: arc beneath the row so the line never crosses sibling cards.
+    if (a.y === b.y) {
+        const sx = A.cx, tx = B.cx;
+        const sy = a.y + NH, ty = sy;
+        const dip = sy + Math.min(56, 20 + Math.abs(tx - sx) / 12);
+        return `M${sx},${sy} C${sx},${dip} ${tx},${dip} ${tx},${ty}`;
+    }
+    // Different depth rows: prefer vertical exit/entry (depth flows downward).
+    const vertical = Math.abs(B.cy - A.cy) >= Math.abs(B.cx - A.cx) || Math.abs(B.cy - A.cy) > NH;
+    const sx = vertical ? A.cx : A.cx + Math.sign(B.cx - A.cx) * NW / 2;
+    const sy = vertical ? A.cy + Math.sign(B.cy - A.cy) * NH / 2 : A.cy;
+    const tx = vertical ? B.cx : B.cx - Math.sign(B.cx - A.cx) * (NW / 2 + 4);
+    const ty = vertical ? B.cy - Math.sign(B.cy - A.cy) * (NH / 2 + 4) : B.cy;
+    if (vertical) {
+        const my = (sy + ty) / 2;
+        return `M${sx},${sy} C${sx},${my} ${tx},${my} ${tx},${ty}`;
+    }
     const mx = (sx + tx) / 2;
     return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
 };
@@ -152,6 +200,11 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
             <DialogContent sx={{ flex: 1, display: 'flex', gap: 2, overflow: 'hidden', pt: 0 }}>
                 <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1 }}>
                     <svg width={layout.width} height={layout.height}>
+                        {/* axis hints: breadth spreads horizontally, depth grows downward */}
+                        <text x={PAD} y={16} fontSize={10.5} fontWeight={600} letterSpacing="0.06em"
+                            fill={theme.palette.text.disabled}>{t('analysisGraph.axisBreadth')}</text>
+                        <text x={12} y={PAD + 34} fontSize={10.5} fontWeight={600} letterSpacing="0.06em"
+                            fill={theme.palette.text.disabled} transform={`rotate(90 12 ${PAD + 34})`}>{t('analysisGraph.axisDepth')}</text>
                         {layout.hulls.map((h, i) => (
                             <g key={`hull-${i}`}>
                                 <rect x={h.x} y={h.y} width={h.w} height={h.h} rx={12}
@@ -172,9 +225,9 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                             const isRef = e.kind === 'refinement';
                             return <path key={`e-${i}`} d={edgePath(a, b)} fill="none"
                                 stroke={isRef ? blue : theme.palette.text.disabled}
-                                strokeWidth={isRef ? 2 : 1.3}
+                                strokeWidth={isRef ? 2 : 1.2}
                                 strokeDasharray={isRef ? undefined : '4 4'}
-                                opacity={isRef ? 0.9 : 0.5}
+                                opacity={isRef ? 0.9 : 0.35}
                                 markerEnd={isRef ? 'url(#ag-arrow)' : undefined} />;
                         })}
                         {layout.placed.map(({ node, x, y }) => (

@@ -130,7 +130,9 @@
     "nodeSub": "{{charts}} charts · L{{level}}",
     "attributesHeading": "Attributes by states analyzed",
     "selectHint": "Click a state to see its charts.",
-    "clickChartHint": "Click a chart to open it on the canvas."
+    "clickChartHint": "Click a chart to open it on the canvas.",
+    "axisBreadth": "BREADTH →",
+    "axisDepth": "DEPTH ↓"
   },
   "landing": {
     "tagline": "Explore data with visualizations, powered by AI agents.",

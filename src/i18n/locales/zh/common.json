@@ -130,7 +130,9 @@
     "nodeSub": "{{charts}} 个图表 · L{{level}}",
     "attributesHeading": "按分析状态数排序的属性",
     "selectHint": "点击状态查看其图表。",
-    "clickChartHint": "点击图表在画布中打开。"
+    "clickChartHint": "点击图表在画布中打开。",
+    "axisBreadth": "广度 →",
+    "axisDepth": "深度 ↓"
   },
   "landing": {
     "tagline": "用 AI Agent 驱动可视化探索数据。",
