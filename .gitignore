@@ -421,3 +421,5 @@ NUL
 
 # Package manager lock files (using yarn)
 package-lock.json
+# Claude Code local config
+.claude/
