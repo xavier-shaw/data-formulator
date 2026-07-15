@@ -1,44 +1,81 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// In-app rendering of the analysis tree (see src/app/analysisGraph.ts): Battle
-// & Heer's search tree over analysis states, complementary to the data thread.
-// Depth is vertical (root/dataset on top, deeper states below); breadth is
-// horizontal (each leaf = one exploratory trajectory). Opened from a floating
-// button on the thread pane; clicking a state focuses one of its charts.
+// In-app rendering of the HYBRID ANALYSIS GRAPH (src/app/analysisHybridGraph.ts):
+// Battle & Heer's attribute-set states fused with the data thread's charts and
+// prompts. A node is a unique attribute set, named by the titles of its charts
+// (each numbered by creation time). An edge is a prompt-driven transition — the
+// user's question or the agent's instruction that moved the analysis from one
+// set to the next. Self-loops (a set refined in place) are shown as ↻ lines
+// inside the node they refine. Layout follows the birth-edge spanning tree:
+// depth vertical (dataset root on top), breadth horizontal (each leaf = one
+// thread). Opened from a floating button on the thread pane; clicking a node
+// focuses one of its charts on the canvas.
 
 import React, { FC, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useTranslation } from 'react-i18next';
 import {
     Box, Chip, Dialog, DialogContent, DialogTitle, IconButton, Tooltip, Typography, useTheme,
 } from '@mui/material';
+import { Theme, alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import PersonIcon from '@mui/icons-material/Person';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import { DataFormulatorState, dfActions, dfSelectors } from '../app/dfSlice';
 import { AppDispatch } from '../app/store';
 import {
-    AnalysisStateNode, AnalysisTree, ROOT_ID, TelemetryLike, buildAnalysisTree,
-} from '../app/analysisGraph';
+    HybridEdge, HybridGraph, HybridNode, PromptSource, ROOT_PREFIX, buildHybridGraph,
+} from '../app/analysisHybridGraph';
 
-const NW = 168, NH = 52, GX = 188, GY = 108, PAD = 32;
-const ROOT_W = 120, ROOT_H = 34;
+// Prompt-source colors, matched to the data thread: the user's warm `custom`
+// palette (DataThread colors user entries with `palette.custom.main`) and the
+// agent's `primary` accent (the toy/summary color).
+const srcMain = (theme: Theme, source: PromptSource): string =>
+    source === 'user' ? theme.palette.custom.main
+        : source === 'agent' ? theme.palette.primary.main
+            : theme.palette.text.secondary;
+const srcText = (theme: Theme, source: PromptSource): string =>
+    source === 'user' ? (theme.palette.custom.textColor || theme.palette.custom.main)
+        : source === 'agent' ? (theme.palette.primary.textColor || theme.palette.primary.main)
+            : theme.palette.text.secondary;
 
-interface PlacedNode { node: AnalysisStateNode; x: number; y: number; }
+/** Small person/robot glyph marking whether a prompt was authored by the user
+ *  or the agent, tinted in that source's thread color. */
+const SourceIcon: FC<{ source: PromptSource; size?: number }> = ({ source, size = 12 }) => {
+    const theme = useTheme();
+    const color = srcMain(theme, source);
+    if (source === 'user') return <PersonIcon sx={{ fontSize: size, color, flexShrink: 0 }} />;
+    if (source === 'agent') return <SmartToyOutlinedIcon sx={{ fontSize: size, color, flexShrink: 0 }} />;
+    return null;
+};
 
-/**
- * Tidy tree layout, root at top: leaves take consecutive horizontal slots in
- * first-visit order; every parent is centered over its children. Depth = row.
- */
-const layoutTree = (tree: AnalysisTree): { placed: PlacedNode[]; rootX: number; width: number; height: number } => {
-    const children = new Map<string, AnalysisStateNode[]>();
-    for (const n of tree.nodes) {
-        if (!children.has(n.parentId!)) children.set(n.parentId!, []);
-        children.get(n.parentId!)!.push(n);
+const sourceLabel = (source: PromptSource): string =>
+    source === 'user' ? 'User prompt' : source === 'agent' ? 'Agent instruction' : '';
+
+const NW = 228, GX = 260, GY = 184, PAD = 40;
+const ROOT_H = 38, ROOT_W = 168;
+const MAX_TITLES = 3, MAX_LOOPS = 2;
+const LABEL_W = 210;
+
+/** Card height grows with the titles + self-loop lines it shows. */
+const nodeHeight = (n: HybridNode, loops: number): number => {
+    if (n.isRoot) return ROOT_H;
+    const titleLines = Math.min(n.charts.length, MAX_TITLES);
+    const loopLines = Math.min(loops, MAX_LOOPS);
+    return 14 + titleLines * 17 + 15 + loopLines * 15 + (n.charts.length > MAX_TITLES ? 13 : 0);
+};
+
+interface Placed { node: HybridNode; x: number; y: number; h: number; }
+
+const layout = (graph: HybridGraph, loopsByNode: Map<string, HybridEdge[]>) => {
+    const children = new Map<string, HybridNode[]>();
+    for (const n of graph.nodes) {
+        if (!n.parentId) continue;
+        if (!children.has(n.parentId)) children.set(n.parentId, []);
+        children.get(n.parentId)!.push(n);
     }
-    for (const kids of children.values()) {
-        kids.sort((a, b) => (a.tFirst ?? 0) - (b.tFirst ?? 0));
-    }
+    for (const kids of children.values()) kids.sort((a, b) => a.firstNum - b.firstNum);
 
     const centers = new Map<string, number>();
     let nextSlot = 0;
@@ -50,187 +87,245 @@ const layoutTree = (tree: AnalysisTree): { placed: PlacedNode[]; rootX: number; 
             centers.set(id, c);
             return c;
         }
-        const kidCenters = kids.map(k => assign(k.id));
-        const c = (kidCenters[0] + kidCenters[kidCenters.length - 1]) / 2;
+        const kc = kids.map(k => assign(k.id));
+        const c = (kc[0] + kc[kc.length - 1]) / 2;
         centers.set(id, c);
         return c;
     };
-    const rootX = assign(ROOT_ID);
+    for (const rid of graph.rootIds) assign(rid);
+    for (const n of graph.nodes) if (!centers.has(n.id)) centers.set(n.id, PAD + (nextSlot++) * GX + NW / 2);
 
-    const placed: PlacedNode[] = tree.nodes.map(n => ({
+    const maxDepth = graph.nodes.length ? Math.max(...graph.nodes.map(n => n.depth)) : 0;
+    const placed: Placed[] = graph.nodes.map(n => ({
         node: n,
-        x: centers.get(n.id)! - NW / 2,
-        y: PAD + 20 + n.depth * GY,
+        x: centers.get(n.id)! - (n.isRoot ? ROOT_W : NW) / 2,
+        y: PAD + n.depth * GY,
+        h: nodeHeight(n, (loopsByNode.get(n.id) || []).length),
     }));
-    const maxDepth = tree.nodes.length ? Math.max(...tree.nodes.map(n => n.depth)) : 0;
-    return {
-        placed,
-        rootX,
-        width: PAD * 2 + Math.max(1, nextSlot) * GX,
-        height: PAD + 20 + (maxDepth + 1) * GY + 20,
-    };
+    return { placed, width: PAD * 2 + Math.max(1, nextSlot) * GX, height: PAD * 2 + (maxDepth + 1) * GY };
 };
 
-/** Vertical parent→child connector, exiting the parent's bottom edge. */
-const treeEdgePath = (px: number, pBottom: number, cx: number, cTop: number): string => {
-    const my = (pBottom + cTop) / 2;
-    return `M${px},${pBottom} C${px},${my} ${cx},${my} ${cx},${cTop - 4}`;
+const treeEdge = (px: number, pB: number, cx: number, cT: number): string => {
+    const my = (pB + cT) / 2;
+    return `M${px},${pB} C${px},${my} ${cx},${my} ${cx},${cT - 3}`;
 };
 
 export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
     const dispatch = useDispatch<AppDispatch>();
-    const { t } = useTranslation();
     const theme = useTheme();
     const tables = useSelector((s: DataFormulatorState) => s.tables);
     const charts = useSelector(dfSelectors.getAllCharts);
     const conceptShelfItems = useSelector((s: DataFormulatorState) => s.conceptShelfItems);
-    // Study builds carry a `studyTelemetry` journal; absent elsewhere, so read loosely.
-    const telemetry = useSelector((s: DataFormulatorState) =>
-        (s as unknown as { studyTelemetry?: TelemetryLike }).studyTelemetry);
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
-    const tree = useMemo(
-        () => (open ? buildAnalysisTree(charts, tables, conceptShelfItems, telemetry) : null),
-        [open, charts, tables, conceptShelfItems, telemetry],
+    const graph = useMemo(
+        () => (open ? buildHybridGraph(tables, charts, conceptShelfItems) : null),
+        [open, tables, charts, conceptShelfItems],
     );
-    const layout = useMemo(() => (tree ? layoutTree(tree) : null), [tree]);
+    const loopsByNode = useMemo(() => {
+        const m = new Map<string, HybridEdge[]>();
+        for (const e of graph?.edges || []) {
+            if (e.kind !== 'self-loop') continue;
+            (m.get(e.to) || m.set(e.to, []).get(e.to)!).push(e);
+        }
+        return m;
+    }, [graph]);
+    const placed = useMemo(() => (graph ? layout(graph, loopsByNode) : null), [graph, loopsByNode]);
 
-    if (!tree || !layout) {
+    if (!graph || !placed) {
         return (
             <Dialog open={open} onClose={onClose} maxWidth="sm">
-                <DialogTitle>{t('analysisGraph.title')}</DialogTitle>
+                <DialogTitle>Analysis graph</DialogTitle>
             </Dialog>
         );
     }
 
-    const posById = new Map(layout.placed.map(p => [p.node.id, p]));
-    const m = tree.metrics;
-    const selected = selectedId ? tree.nodes.find(n => n.id === selectedId) : null;
+    const posById = new Map(placed.placed.map(p => [p.node.id, p]));
+    const m = graph.metrics;
+    const selected = selectedId ? graph.nodes.find(n => n.id === selectedId) : null;
     const blue = theme.palette.primary.main;
     const border = theme.palette.divider;
-    const rootLabel = tables.find(tb => !tb.derive)?.displayId || t('analysisGraph.rootLabel');
-    const rootBottom = PAD + 20 - (GY - ROOT_H) / 2 + ROOT_H;
 
-    const focusChart = (n: AnalysisStateNode) => {
-        const chartId = n.charts[0]?.chartId;
-        if (chartId) {
-            dispatch(dfActions.setFocused({ type: 'chart', chartId }));
-            onClose();
-        }
+    const focusChart = (chartId: string) => {
+        dispatch(dfActions.setFocused({ type: 'chart', chartId }));
+        onClose();
     };
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth={false}
             sx={{ '& .MuiDialog-paper': { width: '92vw', maxWidth: '92vw', height: '88vh', display: 'flex', flexDirection: 'column' } }}>
             <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pb: 1 }}>
-                <Typography component="span" sx={{ fontWeight: 600 }}>{t('analysisGraph.title')}</Typography>
+                <Typography component="span" sx={{ fontWeight: 600 }}>Analysis graph</Typography>
                 <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1 }}>
-                    <Chip size="small" label={t('analysisGraph.statesOfCharts', { states: m.stateCount, charts: m.chartCount })} />
-                    <Chip size="small" label={t('analysisGraph.depth', { depth: m.height })} />
-                    <Chip size="small" label={t('analysisGraph.trajectories', { count: m.leafCount })} />
-                    {m.aspectRatio !== null && (
-                        <Chip size="small" color={m.aspectRatio > 1 ? 'info' : 'default'}
-                            label={t('analysisGraph.aspect', { ratio: m.aspectRatio.toFixed(1) })} />
-                    )}
-                    {m.totalSelfLoops > 0 && (
-                        <Chip size="small" label={t('analysisGraph.selfLoops', { count: m.totalSelfLoops })} />
-                    )}
+                    <Chip size="small" label={`${m.stateCount} states · ${m.chartCount} charts`} />
+                    <Chip size="small" label={`${m.threadCount} threads`} />
+                    <Chip size="small" label={`depth ${m.maxDepth}`} />
+                    {m.selfLoops > 0 && <Chip size="small" label={`↻ ${m.selfLoops}`} />}
                 </Box>
                 <IconButton onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
             </DialogTitle>
             <DialogContent sx={{ flex: 1, display: 'flex', gap: 2, overflow: 'hidden', pt: 0 }}>
-                <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1 }}>
-                    <svg width={layout.width} height={layout.height}>
-                        {/* axis hints */}
-                        <text x={PAD} y={14} fontSize={10.5} fontWeight={600} letterSpacing="0.06em"
-                            fill={theme.palette.text.disabled}>{t('analysisGraph.axisBreadth')}</text>
-                        <text x={10} y={PAD + 30} fontSize={10.5} fontWeight={600} letterSpacing="0.06em"
-                            fill={theme.palette.text.disabled} transform={`rotate(90 10 ${PAD + 30})`}>{t('analysisGraph.axisDepth')}</text>
-
+                <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1, backgroundColor: theme.palette.action.hover }}>
+                    <svg width={placed.width} height={placed.height} style={{ display: 'block' }}>
                         {/* edges */}
-                        {layout.placed.map(({ node, x, y }) => {
-                            const parent = node.parentId === ROOT_ID ? null : posById.get(node.parentId!);
-                            const px = parent ? parent.x + NW / 2 : layout.rootX;
-                            const pBottom = parent ? parent.y + NH : rootBottom;
-                            return <path key={`e-${node.id}`}
-                                d={treeEdgePath(px, pBottom, x + NW / 2, y)}
-                                fill="none" stroke={blue} strokeWidth={1.6} opacity={0.75} />;
+                        {placed.placed.map(({ node, x, y }) => {
+                            const birth = graph.edges.find(e => e.to === node.id && e.isBirth);
+                            if (!birth) return null;
+                            const parent = posById.get(birth.from);
+                            if (!parent) return null;
+                            const px = parent.x + (parent.node.isRoot ? ROOT_W : NW) / 2;
+                            const pB = parent.y + parent.h;
+                            const cx = x + NW / 2;
+                            const midY = (pB + y) / 2;
+                            const dashed = birth.kind === 'thread' && !parent.node.isRoot; // (rare) re-approach
+                            return (
+                                <g key={`e-${node.id}`}>
+                                    <path d={treeEdge(px, pB, cx, y)} fill="none" stroke={blue}
+                                        strokeWidth={1.4} opacity={0.5} strokeDasharray={dashed ? '4 3' : undefined} />
+                                    <foreignObject x={cx - LABEL_W / 2} y={midY - 27} width={LABEL_W} height={54}>
+                                        <div title={`${sourceLabel(birth.source)} · ${birth.full}`} style={{
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%',
+                                        }}>
+                                            <Box sx={{
+                                                display: 'inline-flex', alignItems: 'center', gap: 0.5,
+                                                fontSize: 11, lineHeight: 1.25, color: srcText(theme, birth.source),
+                                                backgroundColor: 'background.paper',
+                                                border: `1px solid ${birth.source ? alpha(srcMain(theme, birth.source), 0.5) : border}`,
+                                                borderRadius: '6px', padding: '3px 8px', maxWidth: '100%',
+                                            }}>
+                                                <SourceIcon source={birth.source} />
+                                                <Box component="span" sx={{
+                                                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                                                    overflow: 'hidden', textAlign: 'left', minWidth: 0,
+                                                }}>{birth.label}</Box>
+                                            </Box>
+                                        </div>
+                                    </foreignObject>
+                                </g>
+                            );
                         })}
 
-                        {/* root (the dataset) */}
-                        <g transform={`translate(${layout.rootX - ROOT_W / 2},${rootBottom - ROOT_H})`}>
-                            <rect width={ROOT_W} height={ROOT_H} rx={17}
-                                fill={theme.palette.action.hover} stroke={border} />
-                            <text x={ROOT_W / 2} y={21} textAnchor="middle" fontSize={11}
-                                fontWeight={600} fill={theme.palette.text.secondary}>
-                                {rootLabel.slice(0, 16)}
-                            </text>
-                        </g>
-
-                        {/* state nodes */}
-                        {layout.placed.map(({ node, x, y }) => (
-                            <g key={node.id} transform={`translate(${x},${y})`} style={{ cursor: 'pointer' }}
-                                onClick={() => setSelectedId(node.id)}>
-                                <title>{node.charts.map(c => c.title || c.chartId).join('\n')}</title>
-                                <rect width={NW} height={NH} rx={8}
-                                    fill={theme.palette.background.paper}
-                                    stroke={selectedId === node.id ? blue : border}
-                                    strokeWidth={selectedId === node.id ? 2 : 1} />
-                                <text x={10} y={20} fontSize={10.5} fontWeight={600} fill={theme.palette.text.primary}>
-                                    {node.attributes.join(', ').slice(0, 25)}{node.attributes.join(', ').length > 25 ? '…' : ''}
-                                </text>
-                                <text x={10} y={38} fontSize={10} fill={theme.palette.text.secondary}>
-                                    {t('analysisGraph.nodeSub', { charts: node.charts.length, level: node.depth })}
-                                </text>
-                                {node.selfLoops > 0 && (
-                                    <g>
-                                        <circle cx={NW - 4} cy={4} r={11} fill={blue} />
-                                        <text x={NW - 4} y={8} textAnchor="middle" fontSize={10}
-                                            fontWeight={700} fill={theme.palette.primary.contrastText}>
-                                            ↻{node.selfLoops}
-                                        </text>
-                                    </g>
-                                )}
-                            </g>
-                        ))}
+                        {/* nodes */}
+                        {placed.placed.map(({ node, x, y, h }) => {
+                            if (node.isRoot) {
+                                return (
+                                    <foreignObject key={node.id} x={x} y={y} width={ROOT_W} height={ROOT_H}>
+                                        <div style={{
+                                            height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            borderRadius: 19, backgroundColor: theme.palette.background.paper,
+                                            border: `1px solid ${border}`, padding: '0 14px', boxSizing: 'border-box',
+                                        }}>
+                                            <span style={{
+                                                fontSize: 12, fontWeight: 600, color: theme.palette.text.secondary,
+                                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                            }}>{node.label}</span>
+                                        </div>
+                                    </foreignObject>
+                                );
+                            }
+                            const sel = selectedId === node.id;
+                            const loops = loopsByNode.get(node.id) || [];
+                            const extraTitles = node.charts.length - MAX_TITLES;
+                            return (
+                                <foreignObject key={node.id} x={x} y={y} width={NW} height={h}>
+                                    <div onClick={() => setSelectedId(node.id)}
+                                        title={`{ ${node.attributes.join(', ')} }`} style={{
+                                            height: '100%', boxSizing: 'border-box', cursor: 'pointer',
+                                            borderRadius: 8, backgroundColor: theme.palette.background.paper,
+                                            border: `${sel ? 2 : 1}px solid ${sel ? blue : border}`,
+                                            padding: '7px 9px', display: 'flex', flexDirection: 'column', gap: 2,
+                                            overflow: 'hidden',
+                                        }}>
+                                        {node.charts.slice(0, MAX_TITLES).map(c => (
+                                            <span key={c.chartId} style={{
+                                                fontSize: 12, fontWeight: 600, color: theme.palette.text.primary,
+                                                lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                            }}>
+                                                <b style={{ color: blue, fontWeight: 700 }}>#{c.num}</b>&nbsp;{c.title || c.chartId}
+                                            </span>
+                                        ))}
+                                        {extraTitles > 0 && (
+                                            <span style={{ fontSize: 10.5, color: theme.palette.text.disabled }}>+{extraTitles} more</span>
+                                        )}
+                                        <span style={{
+                                            fontSize: 10.5, color: theme.palette.text.disabled,
+                                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                        }}>{`{ ${node.attributes.join(', ')} }`}</span>
+                                        {loops.slice(0, MAX_LOOPS).map((lp, li) => (
+                                            <Box key={li} title={`↻ ${sourceLabel(lp.source)} · ${lp.full}`} sx={{
+                                                display: 'flex', alignItems: 'center', gap: 0.5,
+                                                fontSize: 10.5, fontStyle: 'italic', color: srcText(theme, lp.source),
+                                                minWidth: 0,
+                                            }}>
+                                                <span style={{ fontStyle: 'normal', flexShrink: 0 }}>↻</span>
+                                                <SourceIcon source={lp.source} size={11} />
+                                                <Box component="span" sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{lp.label}</Box>
+                                            </Box>
+                                        ))}
+                                    </div>
+                                </foreignObject>
+                            );
+                        })}
                     </svg>
                 </Box>
-                <Box sx={{ width: 300, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    {selected ? (
+                <Box sx={{ width: 330, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {selected && !selected.isRoot ? (
                         <>
-                            <Typography variant="subtitle2">{`{ ${selected.attributes.join(', ')} }`}</Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                {t('analysisGraph.stateStats', {
-                                    visits: selected.visits, selfLoops: selected.selfLoops, revisits: selected.revisits,
-                                })}
+                            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                Attributes ({selected.attributes.length})
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5 }}>
+                                {selected.attributes.map(a => (
+                                    <Chip key={a} size="small" variant="outlined" label={a}
+                                        sx={{ maxWidth: '100%', fontFamily: 'monospace', '& .MuiChip-label': { fontSize: 12 } }} />
+                                ))}
+                            </Box>
+                            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                                attribute-set state · {selected.charts.length} chart{selected.charts.length > 1 ? 's' : ''}
                             </Typography>
                             {selected.charts.map(c => (
-                                <Box key={c.chartId}
-                                    onClick={() => focusChart(selected)}
-                                    sx={{ p: 1, border: `1px solid ${border}`, borderRadius: 1, cursor: 'pointer',
-                                        '&:hover': { borderColor: blue } }}>
-                                    <Typography variant="body2" sx={{ fontWeight: 550 }}>{c.title || c.chartId}</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        {c.chartType} · {c.encodedFields.join(', ')}
+                                <Box key={c.chartId} onClick={() => focusChart(c.chartId)}
+                                    sx={{ p: 1, border: `1px solid ${border}`, borderRadius: 1, cursor: 'pointer', '&:hover': { borderColor: blue } }}>
+                                    <Typography variant="body2" sx={{ fontWeight: 550 }}>
+                                        <span style={{ color: blue, fontWeight: 700 }}>#{c.num}</span>&nbsp;{c.title || c.chartId}
                                     </Typography>
+                                    <Typography variant="caption" color="text.secondary">{c.chartType} · open on canvas →</Typography>
                                 </Box>
                             ))}
-                            <Typography variant="caption" color="text.secondary">{t('analysisGraph.clickChartHint')}</Typography>
+                            {(loopsByNode.get(selected.id) || []).length > 0 && (
+                                <Box sx={{ mt: 0.5 }}>
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Refined in place (↻)</Typography>
+                                    {(loopsByNode.get(selected.id) || []).map((lp, li) => (
+                                        <Box key={li} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}>
+                                            <Tooltip title={sourceLabel(lp.source)}><Box sx={{ display: 'flex', mt: '2px' }}><SourceIcon source={lp.source} /></Box></Tooltip>
+                                            <Typography variant="caption" sx={{ color: srcText(theme, lp.source) }}>{lp.full}</Typography>
+                                        </Box>
+                                    ))}
+                                </Box>
+                            )}
                         </>
                     ) : (
                         <>
-                            <Typography variant="subtitle2">{t('analysisGraph.trajectoriesHeading')}</Typography>
-                            {m.trajectories.map(traj => (
-                                <Box key={traj.leafId} sx={{ p: 1, border: `1px solid ${border}`, borderRadius: 1 }}>
-                                    <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
-                                        {traj.stateIds.map(id => `{ ${id.split('␟').join(', ')} }`).join(' → ')}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        {t('analysisGraph.trajectoryEffort', { visits: traj.totalVisits })}
-                                    </Typography>
-                                </Box>
-                            ))}
-                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>{t('analysisGraph.selectHint')}</Typography>
+                            <Typography variant="subtitle2">How to read this</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                                Each node is a unique <b>attribute set</b> (a Battle &amp; Heer analysis state), named by the
+                                charts that analyze it (numbered by creation time). Each edge is the <b>prompt</b> — the
+                                question or instruction — that moved the analysis from one set to the next. A ↻ line is a
+                                set refined in place; a new thread from the dataset starts whenever a question is unrelated
+                                to the previous one.
+                            </Typography>
+                            <Typography variant="subtitle2" sx={{ mt: 1 }}>Threads</Typography>
+                            {graph.rootIds.map(rid => {
+                                const root = graph.nodes.find(n => n.id === rid)!;
+                                return (
+                                    <Box key={rid} sx={{ p: 1, border: `1px solid ${border}`, borderRadius: 1 }}>
+                                        <Typography variant="caption" sx={{ fontWeight: 600 }}>{root.label}</Typography>
+                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                            {graph.edges.filter(e => e.from === rid).length} thread(s) from this dataset
+                                        </Typography>
+                                    </Box>
+                                );
+                            })}
                         </>
                     )}
                 </Box>
@@ -241,13 +336,12 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
 
 /** Floating opener for the thread pane. */
 export const AnalysisGraphButton: FC = () => {
-    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const chartCount = useSelector((s: DataFormulatorState) => dfSelectors.getAllCharts(s).length);
     if (chartCount === 0) return null;
     return (
         <>
-            <Tooltip title={t('analysisGraph.openTooltip')} placement="right">
+            <Tooltip title="Show analysis graph" placement="right">
                 <IconButton size="small" onClick={() => setOpen(true)}
                     sx={{ position: 'absolute', top: 6, left: 6, zIndex: 5, color: 'text.secondary',
                         backgroundColor: 'background.paper', border: 1, borderColor: 'divider',
