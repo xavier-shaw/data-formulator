@@ -745,6 +745,53 @@ def classify_chart_intent():
         raise classify_and_wrap_llm_error(e) from e
 
 
+@agent_bp.route('/semantic-threads', methods=['POST'])
+def semantic_threads():
+    """Cluster the session's charts into semantic topic threads.
+
+    Powers the "Topics" analysis-graph view: instead of ordering charts by
+    creation time or attribute-set lineage, an LLM groups them by what they
+    are about, one thread per direction of inquiry.
+
+    Request body:
+        model: model config object
+        datasets: [str] — display names of the source dataset(s)
+        charts: [{num, title, attributes: [str], prompt}] — creation order
+
+    Response:
+        {status: "success", data: {threads: [{topic, summary, charts: [num]}]}}
+    """
+    if not request.is_json:
+        raise AppError(ErrorCode.INVALID_REQUEST, "Invalid request format")
+
+    content = request.get_json() or {}
+    charts = content.get("charts") or []
+    model_config = content.get("model")
+
+    if not charts:
+        return json_ok({"threads": []})
+    if not model_config:
+        raise AppError(ErrorCode.INVALID_REQUEST, "No model configured")
+
+    try:
+        client = get_client(model_config)
+        language_instruction = get_language_instruction(mode="compact")
+        agent = SimpleAgents(client=client, language_instruction=language_instruction)
+        result = agent.semantic_threads(
+            dataset_names=content.get("datasets") or [],
+            charts=charts,
+        )
+        return json_ok(result)
+
+    except AppError:
+        raise
+    except json.JSONDecodeError:
+        raise AppError(ErrorCode.AGENT_ERROR, "Failed to parse LLM response as JSON")
+    except Exception as e:
+        logger.warning(f"semantic-threads failed: {e}")
+        raise classify_and_wrap_llm_error(e) from e
+
+
 # ---------------------------------------------------------------------------
 # Chart style refinement (restyle agent)
 # ---------------------------------------------------------------------------

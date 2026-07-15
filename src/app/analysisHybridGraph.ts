@@ -83,7 +83,7 @@ export interface HybridGraph {
 const stripMarkers = (s: string): string => s.replace(/\*\*([^*]+)\*\*/g, '$1');
 
 /** The prompt that drove a step: the user's question, else the agent's instruction. */
-const promptOfTable = (t: DictTable | undefined): { text: string; source: PromptSource } => {
+export const promptOfTable = (t: DictTable | undefined): { text: string; source: PromptSource } => {
     const inter = t?.derive?.trigger?.interaction as InteractionEntry[] | undefined;
     let userPrompt = '', agentInstruction = '';
     for (const e of inter || []) {
@@ -99,7 +99,7 @@ const promptOfTable = (t: DictTable | undefined): { text: string; source: Prompt
 };
 
 /** Creation time for ordering charts into #1..#N. */
-const chartTime = (chart: Chart, table: DictTable | undefined): number => {
+export const chartTime = (chart: Chart, table: DictTable | undefined): number => {
     const explicit = (chart as { createdAt?: number }).createdAt;
     if (typeof explicit === 'number') return explicit;
     const inter = table?.derive?.trigger?.interaction as InteractionEntry[] | undefined;

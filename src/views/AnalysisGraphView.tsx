@@ -1,25 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// In-app rendering of the HYBRID ANALYSIS GRAPH (src/app/analysisHybridGraph.ts):
-// Battle & Heer's attribute-set states fused with the data thread's charts and
-// prompts. A node is a unique attribute set, named by the titles of its charts
-// (each numbered by creation time). An edge is a prompt-driven transition — the
-// user's question or the agent's instruction that moved the analysis from one
-// set to the next. Self-loops (a set refined in place) are shown as ↻ lines
-// inside the node they refine. Layout follows the birth-edge spanning tree:
-// depth vertical (dataset root on top), breadth horizontal (each leaf = one
-// thread). Opened from a floating button on the thread pane; clicking a node
-// focuses one of its charts on the canvas.
+// In-app rendering of the analysis graph, in two modes:
+//
+//   TOPICS (default, src/app/analysisSemanticThreads.ts) — an LLM clusters the
+//   session's charts (titles + attribute sets + driving prompts) into semantic
+//   threads: one column per direction of inquiry, charts ordered as a
+//   narrative progression within it. Breadth = how many topics were explored,
+//   depth = how far each went. Results are cached per chart-set signature.
+//
+//   STRUCTURE (src/app/analysisHybridGraph.ts) — the deterministic hybrid
+//   graph: Battle & Heer's attribute-set states fused with the data thread's
+//   charts and prompts. A node is a unique attribute set, named by the titles
+//   of its charts (each numbered by creation time). An edge is the prompt that
+//   moved the analysis from one set to the next; ↻ lines are in-place
+//   refinements. Layout follows the birth-edge spanning tree.
+//
+// Chart numbers (#1..#N, creation order) match across both modes. Opened from
+// a floating button on the thread pane; clicking a chart focuses it on the
+// canvas.
 
-import React, { FC, useMemo, useState } from 'react';
+import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-    Box, Chip, Dialog, DialogContent, DialogTitle, IconButton, Tooltip, Typography, useTheme,
+    Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle, IconButton,
+    ToggleButton, ToggleButtonGroup, Tooltip, Typography, useTheme,
 } from '@mui/material';
 import { Theme, alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import PersonIcon from '@mui/icons-material/Person';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import { DataFormulatorState, dfActions, dfSelectors } from '../app/dfSlice';
@@ -27,6 +37,10 @@ import { AppDispatch } from '../app/store';
 import {
     HybridEdge, HybridGraph, HybridNode, PromptSource, ROOT_PREFIX, buildHybridGraph,
 } from '../app/analysisHybridGraph';
+import {
+    SemanticChartItem, SemanticThreadsResult, collectSemanticChartItems, fetchSemanticThreads,
+    semanticThreadsSignature,
+} from '../app/analysisSemanticThreads';
 
 // Prompt-source colors, matched to the data thread: the user's warm `custom`
 // palette (DataThread colors user entries with `palette.custom.main`) and the
@@ -110,13 +124,104 @@ const treeEdge = (px: number, pB: number, cx: number, cT: number): string => {
     return `M${px},${pB} C${px},${my} ${cx},${my} ${cx},${cT - 3}`;
 };
 
+// ─── Topics mode (LLM semantic threads) ──────────────────────────────────────
+
+// Thread hues: Vega-Lite's tableau10, the same categorical scheme the app's
+// charts default to, so topic colors read as "categories" here too.
+const THREAD_HUES = ['#4c78a8', '#f58518', '#54a24b', '#b279a2', '#e45756', '#72b7b2', '#eeca3b', '#9d755d'];
+const threadHue = (i: number, fallback: boolean): string | null => (fallback ? null : THREAD_HUES[i % THREAD_HUES.length]);
+
+const COL_W = 252;
+
+/** One thread = one column: topic header, then charts top-to-bottom in the
+ *  model's narrative order, linked by a vertical spine. */
+const SemanticThreadsView: FC<{
+    result: SemanticThreadsResult;
+    onFocusChart: (chartId: string) => void;
+}> = ({ result, onFocusChart }) => {
+    const theme = useTheme();
+    const border = theme.palette.divider;
+    return (
+        <Box sx={{ display: 'flex', gap: 3, p: 2.5, alignItems: 'flex-start' }}>
+            {result.threads.map((t, ti) => {
+                const hue = threadHue(ti, t.isFallback) ?? theme.palette.text.disabled;
+                return (
+                    <Box key={ti} sx={{ width: COL_W, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+                        <Tooltip title={t.summary} placement="top">
+                            <Box sx={{
+                                borderRadius: '8px 8px 0 0', borderLeft: `4px solid ${hue}`,
+                                backgroundColor: alpha(hue, 0.09), padding: '7px 10px',
+                            }}>
+                                <Typography sx={{ fontSize: 13, fontWeight: 700, lineHeight: 1.25 }}>
+                                    {t.topic}
+                                </Typography>
+                                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                                    {t.charts.length} chart{t.charts.length > 1 ? 's' : ''}
+                                    {t.isFallback ? ' · unassigned' : ''}
+                                </Typography>
+                            </Box>
+                        </Tooltip>
+                        {t.summary && (
+                            <Typography sx={{
+                                fontSize: 11, color: 'text.secondary', fontStyle: 'italic',
+                                padding: '6px 2px 2px', lineHeight: 1.35,
+                            }}>{t.summary}</Typography>
+                        )}
+                        {t.charts.map((c, ci) => (
+                            <React.Fragment key={c.chartId}>
+                                {/* spine segment between consecutive charts */}
+                                <Box sx={{
+                                    width: 0, alignSelf: 'center', height: ci === 0 ? 10 : 22,
+                                    borderLeft: `2px solid ${alpha(hue, 0.55)}`,
+                                }} />
+                                <Box onClick={() => onFocusChart(c.chartId)}
+                                    title={c.prompt ? `Prompt: ${c.prompt}` : undefined}
+                                    sx={{
+                                        border: `1px solid ${border}`, borderRadius: 2, cursor: 'pointer',
+                                        backgroundColor: 'background.paper', padding: '8px 10px',
+                                        display: 'flex', flexDirection: 'column', gap: 0.25,
+                                        '&:hover': { borderColor: hue, boxShadow: `0 1px 5px ${alpha(hue, 0.3)}` },
+                                    }}>
+                                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
+                                        <span style={{ color: hue, fontWeight: 700 }}>#{c.num}</span>&nbsp;{c.title}
+                                    </Typography>
+                                    <Typography sx={{
+                                        fontSize: 10.5, color: 'text.disabled', whiteSpace: 'nowrap',
+                                        overflow: 'hidden', textOverflow: 'ellipsis',
+                                    }}>{`{ ${c.attributes.join(', ')} }`}</Typography>
+                                    {c.prompt && (
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                                            <SourceIcon source={c.promptSource} size={11} />
+                                            <Typography sx={{
+                                                fontSize: 10.5, fontStyle: 'italic', color: 'text.secondary',
+                                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                            }}>{c.prompt}</Typography>
+                                        </Box>
+                                    )}
+                                </Box>
+                            </React.Fragment>
+                        ))}
+                    </Box>
+                );
+            })}
+        </Box>
+    );
+};
+
+/** Cross-dialog cache: one clustering per chart-set signature per session. */
+const semanticCache = new Map<string, SemanticThreadsResult>();
+
+type GraphMode = 'topics' | 'structure';
+
 export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
     const dispatch = useDispatch<AppDispatch>();
     const theme = useTheme();
     const tables = useSelector((s: DataFormulatorState) => s.tables);
     const charts = useSelector(dfSelectors.getAllCharts);
     const conceptShelfItems = useSelector((s: DataFormulatorState) => s.conceptShelfItems);
+    const activeModel = useSelector(dfSelectors.getActiveModel);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [mode, setMode] = useState<GraphMode>('topics');
 
     const graph = useMemo(
         () => (open ? buildHybridGraph(tables, charts, conceptShelfItems) : null),
@@ -131,6 +236,47 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
         return m;
     }, [graph]);
     const placed = useMemo(() => (graph ? layout(graph, loopsByNode) : null), [graph, loopsByNode]);
+
+    // ── topics mode: LLM clustering, cached per chart-set signature ──────────
+    const items = useMemo<SemanticChartItem[]>(
+        () => (open ? collectSemanticChartItems(tables, charts, conceptShelfItems) : []),
+        [open, tables, charts, conceptShelfItems],
+    );
+    const sig = useMemo(() => semanticThreadsSignature(items), [items]);
+    const [semantic, setSemantic] = useState<{ sig: string; result: SemanticThreadsResult } | null>(null);
+    const [semanticLoading, setSemanticLoading] = useState(false);
+    const [semanticError, setSemanticError] = useState<{ sig: string; message: string } | null>(null);
+    const requestSeq = useRef(0);
+
+    const runClustering = (force: boolean) => {
+        if (items.length === 0 || !activeModel) return;
+        if (!force) {
+            const hit = semanticCache.get(sig);
+            if (hit) { setSemantic({ sig, result: hit }); setSemanticError(null); return; }
+        }
+        const req = ++requestSeq.current;
+        setSemanticLoading(true);
+        setSemanticError(null);
+        fetchSemanticThreads(items, activeModel)
+            .then(result => {
+                semanticCache.set(sig, result);
+                if (req === requestSeq.current) setSemantic({ sig, result });
+            })
+            .catch(err => {
+                console.warn('[semanticThreads] clustering failed', err);
+                if (req === requestSeq.current) {
+                    setSemanticError({ sig, message: err instanceof Error ? err.message : String(err) });
+                }
+            })
+            .finally(() => { if (req === requestSeq.current) setSemanticLoading(false); });
+    };
+
+    useEffect(() => {
+        if (!open || mode !== 'topics' || semanticLoading) return;
+        if (semantic?.sig === sig || semanticError?.sig === sig) return;   // done or failed for this input
+        runClustering(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, mode, sig]);
 
     if (!graph || !placed) {
         return (
@@ -151,19 +297,74 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
         onClose();
     };
 
+    const sm = semantic?.sig === sig ? semantic.result.metrics : null;
+
     return (
         <Dialog open={open} onClose={onClose} maxWidth={false}
             sx={{ '& .MuiDialog-paper': { width: '92vw', maxWidth: '92vw', height: '88vh', display: 'flex', flexDirection: 'column' } }}>
             <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pb: 1 }}>
                 <Typography component="span" sx={{ fontWeight: 600 }}>Analysis graph</Typography>
-                <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1 }}>
-                    <Chip size="small" label={`${m.stateCount} states · ${m.chartCount} charts`} />
-                    <Chip size="small" label={`${m.threadCount} threads`} />
-                    <Chip size="small" label={`depth ${m.maxDepth}`} />
-                    {m.selfLoops > 0 && <Chip size="small" label={`↻ ${m.selfLoops}`} />}
+                <ToggleButtonGroup size="small" exclusive value={mode}
+                    onChange={(_, v) => { if (v) setMode(v); }}
+                    sx={{ '& .MuiToggleButton-root': { py: 0.25, px: 1.25, fontSize: 12, textTransform: 'none' } }}>
+                    <ToggleButton value="topics">Topics</ToggleButton>
+                    <ToggleButton value="structure">Structure</ToggleButton>
+                </ToggleButtonGroup>
+                <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', flex: 1, alignItems: 'center' }}>
+                    {mode === 'structure' ? (
+                        <>
+                            <Chip size="small" label={`${m.stateCount} states · ${m.chartCount} charts`} />
+                            <Chip size="small" label={`${m.threadCount} threads`} />
+                            <Chip size="small" label={`depth ${m.maxDepth}`} />
+                            {m.selfLoops > 0 && <Chip size="small" label={`↻ ${m.selfLoops}`} />}
+                        </>
+                    ) : sm && (
+                        <>
+                            <Chip size="small" label={`${sm.threadCount} topics · ${sm.chartCount} charts`} />
+                            <Chip size="small" label={`deepest ${sm.maxThreadLength}`} />
+                            <Tooltip title="Re-cluster with the model">
+                                <span>
+                                    <IconButton size="small" disabled={semanticLoading} onClick={() => runClustering(true)}>
+                                        <RefreshIcon sx={{ fontSize: 16 }} />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                        </>
+                    )}
                 </Box>
                 <IconButton onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
             </DialogTitle>
+            {mode === 'topics' ? (
+                <DialogContent sx={{ flex: 1, display: 'flex', overflow: 'hidden', pt: 0 }}>
+                    <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1, backgroundColor: theme.palette.action.hover }}>
+                        {items.length === 0 ? (
+                            <Typography sx={{ p: 3, color: 'text.secondary', fontSize: 13 }}>
+                                No charts to cluster yet.
+                            </Typography>
+                        ) : !activeModel ? (
+                            <Typography sx={{ p: 3, color: 'text.secondary', fontSize: 13 }}>
+                                Select a model to cluster the analysis into topics.
+                            </Typography>
+                        ) : semanticLoading ? (
+                            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
+                                <CircularProgress size={26} />
+                                <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+                                    Clustering {items.length} charts into topics…
+                                </Typography>
+                            </Box>
+                        ) : semanticError?.sig === sig ? (
+                            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
+                                <Typography sx={{ fontSize: 13, color: 'error.main', maxWidth: 480, textAlign: 'center' }}>
+                                    Failed to cluster charts: {semanticError.message}
+                                </Typography>
+                                <Button size="small" variant="outlined" onClick={() => runClustering(true)}>Retry</Button>
+                            </Box>
+                        ) : semantic?.sig === sig ? (
+                            <SemanticThreadsView result={semantic.result} onFocusChart={focusChart} />
+                        ) : null}
+                    </Box>
+                </DialogContent>
+            ) : (
             <DialogContent sx={{ flex: 1, display: 'flex', gap: 2, overflow: 'hidden', pt: 0 }}>
                 <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1, backgroundColor: theme.palette.action.hover }}>
                     <svg width={placed.width} height={placed.height} style={{ display: 'block' }}>
@@ -330,6 +531,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                     )}
                 </Box>
             </DialogContent>
+            )}
         </Dialog>
     );
 };

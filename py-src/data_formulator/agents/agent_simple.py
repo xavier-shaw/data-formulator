@@ -94,6 +94,44 @@ _CHART_INTENT_SYSTEM_PROMPT = (
 )
 
 
+_SEMANTIC_THREADS_SYSTEM_PROMPT = """\
+You reconstruct the topical structure of a data analysis session.
+
+You are given the dataset name(s) and the charts an analyst created, in creation \
+order. Each chart has:
+- "num": creation-order number
+- "title": the chart's title
+- "attributes": the dataset columns the chart analyzes
+- "prompt": the question or instruction that produced it (may be empty)
+
+Group the charts into SEMANTIC THREADS. A thread is one topic or direction of \
+inquiry — a coherent line of questions about the same subject (e.g. "damage \
+severity by species" or "strike frequency across airports"). Charts in a thread \
+continue, refine, or deepen one another; a new thread starts when the analysis \
+pivots to a different subject.
+
+Rules:
+- Every chart belongs to exactly ONE thread.
+- Judge primarily by the semantic meaning of titles and prompts; use attribute \
+overlap as supporting evidence. Charts sharing attributes may still be different \
+topics, and one topic may span different attributes.
+- Within a thread, order charts as a narrative progression — broad overview \
+first, deeper or more specific views after. Follow creation order unless the \
+semantics clearly suggest a better progression.
+- Order threads by the creation number of their earliest chart.
+- Prefer fewer coherent threads over many fragments, but never force unrelated \
+topics together. A single chart may stand alone if it is a genuine one-off pivot.
+- "topic" is a short noun phrase (2-6 words) naming the thread's subject; \
+"summary" is one sentence on what the analyst investigated in it.
+
+Return ONLY a JSON object, no markdown fences and no explanation:
+{
+  "threads": [
+    {"topic": "...", "summary": "...", "charts": [<num>, <num>, ...]}
+  ]
+}"""
+
+
 # ---------------------------------------------------------------------------
 # Class
 # ---------------------------------------------------------------------------
@@ -235,3 +273,71 @@ class SimpleAgents:
             verdict = "data"
         logger.info("[SimpleAgents.classify_chart_intent] %r -> %s", text[:80], verdict)
         return verdict
+
+    # -- Semantic analysis threads (topic clustering of session charts) -----
+
+    def semantic_threads(self, dataset_names: list[str], charts: list[dict]) -> dict:
+        """Cluster a session's charts into semantic topic threads.
+
+        Parameters
+        ----------
+        dataset_names : list[str]
+            Display names of the source dataset(s) under analysis.
+        charts : list[dict]
+            One entry per chart, in creation order:
+            ``{"num": int, "title": str, "attributes": [str], "prompt": str}``.
+
+        Returns
+        -------
+        dict ``{"threads": [{"topic", "summary", "charts": [num, ...]}]}``.
+        The frontend re-validates chart numbers and reassigns strays, so this
+        only guarantees structural shape, not referential integrity.
+        """
+        chart_json = json.dumps(charts, ensure_ascii=False, indent=1)
+        user_msg = (
+            f"Dataset(s): {', '.join(dataset_names) if dataset_names else 'unknown'}\n\n"
+            f"Charts (creation order):\n{chart_json}"
+        )
+
+        system_prompt = inject_language_instruction(
+            _SEMANTIC_THREADS_SYSTEM_PROMPT, self.language_instruction,
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ]
+
+        logger.info(f"[SimpleAgents.semantic_threads] run start | {len(charts)} charts")
+        response = self.client.get_completion(
+            messages=messages,
+            reasoning_effort=reasoning_effort_for("semantic_threads", self.client.model),
+        )
+        raw = (response.choices[0].message.content or "").strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            candidates = [b for b in extract_json_objects(raw) if isinstance(b, dict) and "threads" in b]
+            if not candidates:
+                raise
+            result = candidates[0]
+
+        threads = []
+        for t in result.get("threads") or []:
+            if not isinstance(t, dict):
+                continue
+            nums = [int(n) for n in (t.get("charts") or []) if isinstance(n, (int, float))]
+            threads.append({
+                "topic": str(t.get("topic") or "").strip(),
+                "summary": str(t.get("summary") or "").strip(),
+                "charts": nums,
+            })
+
+        logger.info(f"[SimpleAgents.semantic_threads] done | {len(threads)} threads")
+        return {"threads": threads}

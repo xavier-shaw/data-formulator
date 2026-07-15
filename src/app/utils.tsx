@@ -64,6 +64,9 @@ export function getUrls() {
         // Intent classifier — routes a chart prompt to restyle vs. data agent
         CLASSIFY_CHART_INTENT: `/api/agent/classify-chart-intent`,
 
+        // Semantic topic clustering of session charts (Topics analysis view)
+        SEMANTIC_THREADS: `/api/agent/semantic-threads`,
+
         // Refresh data endpoint
         REFRESH_DERIVED_DATA: `/api/agent/refresh-derived-data`,
 
