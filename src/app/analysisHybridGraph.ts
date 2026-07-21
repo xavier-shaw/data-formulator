@@ -30,6 +30,7 @@
 
 import { Chart, DictTable, FieldItem, InteractionEntry } from '../components/ComponentType';
 import { STATE_ID_SEP, chartAttributeSet } from './analysisGraph';
+import { chartDisplayTitle } from './chartTitle';
 
 export const ROOT_PREFIX = 'root:';
 
@@ -37,7 +38,7 @@ export interface HybridChartRef {
     num: number;                // creation-time index (1-based)
     chartId: string;
     chartType: string;
-    title?: string;
+    title: string;              // display name — never an id (see chartTitle.ts)
 }
 
 export interface HybridNode {
@@ -188,10 +189,13 @@ export const buildHybridGraph = (
             };
             nodesById.set(v.stateId, node);
         }
-        node.charts.push({ num, chartId: v.chart.id, chartType: v.chart.chartType, title: v.chart.title });
+        node.charts.push({
+            num, chartId: v.chart.id, chartType: v.chart.chartType,
+            title: chartDisplayTitle(v.chart, fieldsById),
+        });
     });
     for (const n of nodesById.values()) {
-        if (!n.isRoot) n.label = n.charts.map(c => c.title || c.chartId).join('\n');
+        if (!n.isRoot) n.label = n.charts.map(c => c.title).join('\n');
     }
 
     // 3. Edges: one per chart (deduped by from/to/prompt), classified.

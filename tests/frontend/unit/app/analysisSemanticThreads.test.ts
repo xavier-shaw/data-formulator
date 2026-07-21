@@ -69,6 +69,15 @@ describe('collectSemanticChartItems', () => {
         expect(out.every(i => i.datasetName === 'src')).toBe(true);
     });
 
+    it('names an untitled chart from its encodings, never by id', () => {
+        const { tables, charts, conceptShelfItems } = fixture();
+        const untitled = charts.map(c => (c.id === 'c2' ? { ...c, title: undefined } : c));
+        const out = collectSemanticChartItems(tables, untitled, conceptShelfItems);
+        const c2 = out.find(i => i.chartId === 'c2')!;
+        expect(c2.title).toBe('B by A');                 // y=B, x=A
+        expect(out.every(i => i.title !== i.chartId)).toBe(true);
+    });
+
     it('skips non-user charts and charts on unknown tables', () => {
         const { tables, charts, conceptShelfItems } = fixture();
         const extra = [

@@ -81,6 +81,15 @@ describe('buildHybridGraph', () => {
         expect(numOf('B and C')).toBe(4);
     });
 
+    it('names an untitled chart from its encodings, never by id', () => {
+        const { tables, charts, conceptShelfItems } = fixture();
+        const untitled = charts.map(c => (c.id === 'c4' ? { ...c, title: undefined } : c));
+        const g = buildHybridGraph(tables, untitled, conceptShelfItems);
+        const c4 = g.nodes.flatMap(n => n.charts).find(c => c.chartId === 'c4')!;
+        expect(c4.title).toBe('C by B');                 // y=C, x=B
+        expect(g.nodes.every(n => !n.label.includes('c4'))).toBe(true);
+    });
+
     it('classifies edges: thread / self-loop / edge, and reroutes a disjoint pivot to root', () => {
         const { tables, charts, conceptShelfItems } = fixture();
         const g = buildHybridGraph(tables, charts, conceptShelfItems);

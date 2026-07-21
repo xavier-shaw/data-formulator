@@ -19,6 +19,7 @@
 import { Chart, DictTable, FieldItem } from '../components/ComponentType';
 import { chartAttributeSet } from './analysisGraph';
 import { PromptSource, chartTime, promptOfTable } from './analysisHybridGraph';
+import { chartDisplayTitle } from './chartTitle';
 import { apiRequest } from './apiClient';
 import { getUrls } from './utils';
 
@@ -26,7 +27,7 @@ export interface SemanticChartItem {
     num: number;                // creation-time index, aligned with the hybrid view
     chartId: string;
     chartType: string;
-    title: string;              // falls back to chartId when untitled
+    title: string;              // display name — never an id (see chartTitle.ts)
     attributes: string[];
     prompt: string;             // the user question / agent instruction behind it
     promptSource: PromptSource;
@@ -89,7 +90,7 @@ export const collectSemanticChartItems = (
             num: i + 1,
             chartId: v.chart.id,
             chartType: v.chart.chartType,
-            title: v.chart.title || v.chart.id,
+            title: chartDisplayTitle(v.chart, fieldsById),
             attributes: v.attrs,
             prompt: text,
             promptSource: source,

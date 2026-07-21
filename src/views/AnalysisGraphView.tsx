@@ -17,8 +17,9 @@
 //   refinements. Layout follows the birth-edge spanning tree.
 //
 // Chart numbers (#1..#N, creation order) match across both modes. Opened from
-// a floating button on the thread pane; clicking a chart focuses it on the
-// canvas.
+// a floating button on the thread pane. Selecting a chart previews it in the
+// side panel — the dialog stays open, so the graph remains the place you read
+// the analysis from; an explicit "Open on canvas" button is the way out.
 
 import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -41,6 +42,7 @@ import {
     SemanticChartItem, SemanticThreadsResult, collectSemanticChartItems, fetchSemanticThreads,
     semanticThreadsSignature,
 } from '../app/analysisSemanticThreads';
+import { getCachedChart } from '../app/chartCache';
 
 // Prompt-source colors, matched to the data thread: the user's warm `custom`
 // palette (DataThread colors user entries with `palette.custom.main`) and the
@@ -66,6 +68,64 @@ const SourceIcon: FC<{ source: PromptSource; size?: number }> = ({ source, size 
 
 const sourceLabel = (source: PromptSource): string =>
     source === 'user' ? 'User prompt' : source === 'agent' ? 'Agent instruction' : '';
+
+// ─── side-panel chart preview ────────────────────────────────────────────────
+
+/** The chart itself, drawn in the side panel.
+ *
+ *  ChartRenderService renders every chart off-screen, writing a full-size PNG
+ *  to the module-level chart cache and a thumbnail to redux. The module cache
+ *  is not reactive, so subscribe to the thumbnail — the two are written
+ *  together, so that subscription is what re-renders us once the full-size PNG
+ *  is available (and it doubles as the fallback source). */
+const ChartPreview: FC<{ chartId: string; chartType: string; height?: number }> = ({
+    chartId, chartType, height = 150,
+}) => {
+    const thumbnail = useSelector((s: DataFormulatorState) => s.chartThumbnails?.[chartId]);
+    const src = getCachedChart(chartId)?.fullPngDataUrl || thumbnail;
+
+    const placeholder = (msg: string) => (
+        <Box sx={{
+            height, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: t => `1px dashed ${t.palette.divider}`, borderRadius: 1,
+            fontSize: 11, color: 'text.disabled',
+        }}>{msg}</Box>
+    );
+    if (chartType === 'Table' || chartType === '?') return placeholder('No chart preview');
+    if (!src) return placeholder('Rendering…');
+    return (
+        <Box component="img" src={src} alt=""
+            sx={{
+                width: '100%', height, objectFit: 'contain', display: 'block',
+                backgroundColor: 'background.paper',
+                border: t => `1px solid ${t.palette.divider}`, borderRadius: 1,
+            }} />
+    );
+};
+
+/** Side-panel entry for one chart: name, preview, and a way out to the canvas. */
+const ChartPanelCard: FC<{
+    num: number; title: string; chartType: string; chartId: string;
+    accent: string; onOpen: () => void; children?: React.ReactNode;
+}> = ({ num, title, chartType, chartId, accent, onOpen, children }) => (
+    <Box sx={{
+        p: 1, border: t => `1px solid ${t.palette.divider}`, borderRadius: 1,
+        display: 'flex', flexDirection: 'column', gap: 0.75,
+    }}>
+        <Typography variant="body2" sx={{ fontWeight: 550, lineHeight: 1.3 }}>
+            <span style={{ color: accent, fontWeight: 700 }}>#{num}</span>&nbsp;{title}
+        </Typography>
+        <ChartPreview chartId={chartId} chartType={chartType} />
+        {children}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">{chartType}</Typography>
+            <Button size="small" onClick={onOpen}
+                sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, py: 0 }}>
+                Open on canvas →
+            </Button>
+        </Box>
+    </Box>
+);
 
 const NW = 228, GX = 260, GY = 184, PAD = 40;
 const ROOT_H = 38, ROOT_W = 168;
@@ -137,8 +197,9 @@ const COL_W = 252;
  *  model's narrative order, linked by a vertical spine. */
 const SemanticThreadsView: FC<{
     result: SemanticThreadsResult;
-    onFocusChart: (chartId: string) => void;
-}> = ({ result, onFocusChart }) => {
+    selectedChartId: string | null;
+    onSelectChart: (chartId: string) => void;
+}> = ({ result, selectedChartId, onSelectChart }) => {
     const theme = useTheme();
     const border = theme.palette.divider;
     return (
@@ -174,10 +235,12 @@ const SemanticThreadsView: FC<{
                                     width: 0, alignSelf: 'center', height: ci === 0 ? 10 : 22,
                                     borderLeft: `2px solid ${alpha(hue, 0.55)}`,
                                 }} />
-                                <Box onClick={() => onFocusChart(c.chartId)}
+                                <Box onClick={() => onSelectChart(c.chartId)}
                                     title={c.prompt ? `Prompt: ${c.prompt}` : undefined}
                                     sx={{
-                                        border: `1px solid ${border}`, borderRadius: 2, cursor: 'pointer',
+                                        border: `${selectedChartId === c.chartId ? 2 : 1}px solid ${
+                                            selectedChartId === c.chartId ? hue : border}`,
+                                        borderRadius: 2, cursor: 'pointer',
                                         backgroundColor: 'background.paper', padding: '8px 10px',
                                         display: 'flex', flexDirection: 'column', gap: 0.25,
                                         '&:hover': { borderColor: hue, boxShadow: `0 1px 5px ${alpha(hue, 0.3)}` },
@@ -221,6 +284,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
     const conceptShelfItems = useSelector((s: DataFormulatorState) => s.conceptShelfItems);
     const activeModel = useSelector(dfSelectors.getActiveModel);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
     const [mode, setMode] = useState<GraphMode>('topics');
 
     const graph = useMemo(
@@ -292,12 +356,18 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
     const blue = theme.palette.primary.main;
     const border = theme.palette.divider;
 
-    const focusChart = (chartId: string) => {
+    /** Explicit escape hatch — only the side panel's button calls this. */
+    const openOnCanvas = (chartId: string) => {
         dispatch(dfActions.setFocused({ type: 'chart', chartId }));
         onClose();
     };
 
-    const sm = semantic?.sig === sig ? semantic.result.metrics : null;
+    const semResult = semantic?.sig === sig ? semantic.result : null;
+    const sm = semResult?.metrics ?? null;
+    const selectedTopic = selectedChartId
+        ? semResult?.threads.find(t => t.charts.some(c => c.chartId === selectedChartId)) ?? null
+        : null;
+    const selectedItem = selectedTopic?.charts.find(c => c.chartId === selectedChartId) ?? null;
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth={false}
@@ -335,7 +405,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                 <IconButton onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
             </DialogTitle>
             {mode === 'topics' ? (
-                <DialogContent sx={{ flex: 1, display: 'flex', overflow: 'hidden', pt: 0 }}>
+                <DialogContent sx={{ flex: 1, display: 'flex', gap: 2, overflow: 'hidden', pt: 0 }}>
                     <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1, backgroundColor: theme.palette.action.hover }}>
                         {items.length === 0 ? (
                             <Typography sx={{ p: 3, color: 'text.secondary', fontSize: 13 }}>
@@ -359,9 +429,58 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 </Typography>
                                 <Button size="small" variant="outlined" onClick={() => runClustering(true)}>Retry</Button>
                             </Box>
-                        ) : semantic?.sig === sig ? (
-                            <SemanticThreadsView result={semantic.result} onFocusChart={focusChart} />
+                        ) : semResult ? (
+                            <SemanticThreadsView result={semResult} selectedChartId={selectedChartId}
+                                onSelectChart={setSelectedChartId} />
                         ) : null}
+                    </Box>
+                    <Box sx={{ width: 330, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {selectedItem && selectedTopic ? (
+                            <>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                    {selectedTopic.topic}
+                                </Typography>
+                                <ChartPanelCard num={selectedItem.num} title={selectedItem.title}
+                                    chartType={selectedItem.chartType} chartId={selectedItem.chartId}
+                                    accent={threadHue(semResult!.threads.indexOf(selectedTopic), selectedTopic.isFallback) ?? blue}
+                                    onOpen={() => openOnCanvas(selectedItem.chartId)}>
+                                    {selectedItem.prompt && (
+                                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                                            <Tooltip title={sourceLabel(selectedItem.promptSource)}>
+                                                <Box sx={{ display: 'flex', mt: '2px' }}>
+                                                    <SourceIcon source={selectedItem.promptSource} />
+                                                </Box>
+                                            </Tooltip>
+                                            <Typography variant="caption" sx={{ color: srcText(theme, selectedItem.promptSource) }}>
+                                                {selectedItem.prompt}
+                                            </Typography>
+                                        </Box>
+                                    )}
+                                </ChartPanelCard>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 0.5 }}>
+                                    Attributes ({selectedItem.attributes.length})
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5 }}>
+                                    {selectedItem.attributes.map(a => (
+                                        <Chip key={a} size="small" variant="outlined" label={a}
+                                            sx={{ maxWidth: '100%', fontFamily: 'monospace', '& .MuiChip-label': { fontSize: 12 } }} />
+                                    ))}
+                                </Box>
+                            </>
+                        ) : (
+                            <>
+                                <Typography variant="subtitle2">How to read this</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                    Each column is a <b>topic</b> — one direction of inquiry, clustered by a language
+                                    model from the charts' titles, attributes, and the questions behind them. Charts run
+                                    top-to-bottom as a narrative, so the number of columns is how <b>broad</b> the
+                                    analysis was and the length of a column is how <b>deep</b> it went.
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                    Select a chart to preview it here.
+                                </Typography>
+                            </>
+                        )}
                     </Box>
                 </DialogContent>
             ) : (
@@ -442,7 +561,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                                 fontSize: 12, fontWeight: 600, color: theme.palette.text.primary,
                                                 lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                             }}>
-                                                <b style={{ color: blue, fontWeight: 700 }}>#{c.num}</b>&nbsp;{c.title || c.chartId}
+                                                <b style={{ color: blue, fontWeight: 700 }}>#{c.num}</b>&nbsp;{c.title}
                                             </span>
                                         ))}
                                         {extraTitles > 0 && (
@@ -485,13 +604,9 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 attribute-set state · {selected.charts.length} chart{selected.charts.length > 1 ? 's' : ''}
                             </Typography>
                             {selected.charts.map(c => (
-                                <Box key={c.chartId} onClick={() => focusChart(c.chartId)}
-                                    sx={{ p: 1, border: `1px solid ${border}`, borderRadius: 1, cursor: 'pointer', '&:hover': { borderColor: blue } }}>
-                                    <Typography variant="body2" sx={{ fontWeight: 550 }}>
-                                        <span style={{ color: blue, fontWeight: 700 }}>#{c.num}</span>&nbsp;{c.title || c.chartId}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">{c.chartType} · open on canvas →</Typography>
-                                </Box>
+                                <ChartPanelCard key={c.chartId} num={c.num} title={c.title}
+                                    chartType={c.chartType} chartId={c.chartId} accent={blue}
+                                    onOpen={() => openOnCanvas(c.chartId)} />
                             ))}
                             {(loopsByNode.get(selected.id) || []).length > 0 && (
                                 <Box sx={{ mt: 0.5 }}>
