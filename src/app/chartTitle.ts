@@ -33,8 +33,18 @@ export const deriveChartName = (chart: Chart, fieldsById: Map<string, FieldItem>
     const map = (chart.encodingMap || {}) as Record<string, { fieldID?: string; aggregate?: string }>;
     const labelOf = (channel: string) => encodingLabel(map[channel], fieldsById);
 
-    const value = VALUE_CHANNELS.map(labelOf).find(Boolean) || '';
-    const category = CATEGORY_CHANNELS.map(labelOf).find(Boolean) || '';
+    const valueChannel = VALUE_CHANNELS.find(c => labelOf(c));
+    const categoryChannel = CATEGORY_CHANNELS.find(c => labelOf(c));
+    let value = valueChannel ? labelOf(valueChannel) : '';
+    let category = categoryChannel ? labelOf(categoryChannel) : '';
+
+    // A horizontal bar puts the measure on x and the category on y, which the
+    // channel order above reads backwards. The aggregate marks the real
+    // measure, so swap when it sits on the channel we called the category.
+    if (valueChannel && categoryChannel
+        && map[categoryChannel]?.aggregate && !map[valueChannel]?.aggregate) {
+        [value, category] = [category, value];
+    }
 
     if (value && category) {
         // A third encoded field (e.g. color alongside x/y) is worth naming too,

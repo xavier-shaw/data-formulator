@@ -39,6 +39,13 @@ describe('deriveChartName', () => {
         expect(deriveChartName(c, fields)).toBe('Damage by Species · Airport');
     });
 
+    it('reads a horizontal bar the right way round (measure on x)', () => {
+        const c = chart({
+            x: { fieldID: 'f-damage', aggregate: 'sum' }, y: { fieldID: 'f-species' },
+        });
+        expect(deriveChartName(c, fields)).toBe('sum(Damage) by Species');
+    });
+
     it('falls back to the single encoded field when only one channel is bound', () => {
         expect(deriveChartName(chart({ x: { fieldID: 'f-species' } }), fields)).toBe('Species');
         expect(deriveChartName(chart({ y: { fieldID: 'f-damage' } }), fields)).toBe('Damage');
