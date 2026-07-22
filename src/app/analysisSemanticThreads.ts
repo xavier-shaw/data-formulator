@@ -99,9 +99,10 @@ export const collectSemanticChartItems = (
     });
 };
 
-/** Stable key for caching a clustering result: changes iff the inputs change. */
+/** Stable key for caching a clustering result: changes iff the inputs
+ *  (including the driving prompts) change. */
 export const semanticThreadsSignature = (items: SemanticChartItem[]): string =>
-    items.map(i => `${i.chartId}${i.title}${i.attributes.join(',')}`).join('');
+    items.map(i => `${i.chartId}${i.title}${i.attributes.join(',')}${i.promptSource ?? ''}:${i.prompt}`).join('');
 
 /**
  * Normalize the model's thread assignment against the actual chart list:

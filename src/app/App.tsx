@@ -67,6 +67,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 
 import { DataFormulatorFC } from '../views/DataFormulator';
 import { useAutoSave } from './useAutoSave';
+import { useChartUsageTracker } from './chartUsageTelemetry';
 import { useWorkspaceAutoName } from './useWorkspaceAutoName';
 
 import GridViewIcon from '@mui/icons-material/GridView';
@@ -785,6 +786,8 @@ const AppShell: FC = () => {
 
     // Auto-persist session state to the active workspace (debounced)
     useAutoSave();
+    // Accumulate per-chart viewing time for the analysis graph's usage view
+    useChartUsageTracker();
     // Auto-name workspace after first table + model are available
     useWorkspaceAutoName();
     const generatedReports = useSelector((state: DataFormulatorState) => state.generatedReports);

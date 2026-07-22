@@ -101,11 +101,26 @@ export interface ModelConfig {
 }
 
 
-export type FocusedId = 
+export type FocusedId =
     | { type: 'table'; tableId: string }
     | { type: 'chart'; chartId: string }
     | { type: 'report'; reportId: string }
     | undefined;
+
+/**
+ * Per-chart viewing telemetry, keyed by chart id. Captured passively by
+ * `useChartUsageTracker` (src/app/chartUsageTelemetry.ts) while a chart is
+ * focused on the canvas, and read by the analysis graph so a facilitator can
+ * see where the analyst's attention went. Persisted with the workspace.
+ */
+export interface ChartUsageEntry {
+    /** Accumulated active viewing time (visible tab, non-idle), in ms. */
+    focusMs: number;
+    /** Number of distinct focus sessions (re-focusing the same chart counts again). */
+    visits: number;
+    firstViewedAt?: number;
+    lastViewedAt?: number;
+}
 
 export const DEFAULT_ROW_LIMIT = 2_000_000;
 export const DEFAULT_ROW_LIMIT_EPHEMERAL = 20_000;
@@ -183,6 +198,9 @@ export interface DataFormulatorState {
     focusedDataCleanBlockId: {blockId: string, itemId: number} | undefined;
 
     focusedId: FocusedId;
+
+    /** Passive per-chart viewing telemetry (see ChartUsageEntry). */
+    chartUsage: Record<string, ChartUsageEntry>;
 
     viewMode: 'editor' | 'report';
 
@@ -307,6 +325,7 @@ const initialState: DataFormulatorState = {
 
     focusedDataCleanBlockId: undefined,
     focusedId: undefined,
+    chartUsage: {},
 
     viewMode: 'editor',
 
@@ -744,6 +763,7 @@ export const dataFormulatorSlice = createSlice({
             state.focusedDataCleanBlockId = undefined;
 
             state.focusedId = undefined;
+            state.chartUsage = {};
 
             state.viewMode = 'editor';
 
@@ -897,6 +917,7 @@ export const dataFormulatorSlice = createSlice({
                 conceptShelfItems: saved.conceptShelfItems || [],
                 focusedDataCleanBlockId: saved.focusedDataCleanBlockId || undefined,
                 focusedId: saved.focusedId || undefined,
+                chartUsage: saved.chartUsage || {},
                 config: { ...initialState.config, ...(saved.config || {}) },
                 dataCleanBlocks: saved.dataCleanBlocks || [],
                 dataLoadingChatMessages: saved.dataLoadingChatMessages || [],
@@ -1690,6 +1711,21 @@ export const dataFormulatorSlice = createSlice({
         },
         setFocusedDataCleanBlockId: (state, action: PayloadAction<{blockId: string, itemId: number} | undefined>) => {
             state.focusedDataCleanBlockId = action.payload;
+        },
+        /**
+         * Credit viewing time (and optionally a visit) to a chart. Dispatched
+         * only by the usage tracker — `focusMs` is a delta since the last
+         * flush, never a total.
+         */
+        recordChartUsage: (state, action: PayloadAction<{ chartId: string; focusMs: number; visit?: boolean }>) => {
+            const { chartId, focusMs, visit } = action.payload;
+            if (!state.chartUsage) state.chartUsage = {};   // pre-telemetry persisted states
+            const now = Date.now();
+            const entry = state.chartUsage[chartId]
+                ?? (state.chartUsage[chartId] = { focusMs: 0, visits: 0, firstViewedAt: now });
+            entry.focusMs += Math.max(0, focusMs);
+            if (visit) entry.visits += 1;
+            entry.lastViewedAt = now;
         },
         changeChartRunningStatus: (state, action: PayloadAction<{chartId: string, status: boolean}>) => {
             if (action.payload.status) {

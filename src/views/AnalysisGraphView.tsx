@@ -16,10 +16,21 @@
 //   moved the analysis from one set to the next; ↻ lines are in-place
 //   refinements. Layout follows the birth-edge spanning tree.
 //
+// Both modes share one visual language, aimed at a facilitator monitoring the
+// analysis process:
+//   - ROLE — who drove each chart (user vs agent, from the prompt behind it) —
+//     is shown as a colored left edge + badge on every chart card, in the same
+//     colors the data thread uses (user = warm `custom`, agent = `primary`).
+//   - VIEWING TIME — captured passively by src/app/chartUsageTelemetry.ts —
+//     appears as a neutral heat chip on every chart (background intensity =
+//     share of the most-viewed chart), so attention hotspots pop out.
+//
 // Chart numbers (#1..#N, creation order) match across both modes. Opened from
 // a floating button on the thread pane. Selecting a chart previews it in the
 // side panel — the dialog stays open, so the graph remains the place you read
 // the analysis from; an explicit "Open on canvas" button is the way out.
+// While the dialog is open, usage tracking is paused (reading the graph must
+// not inflate the chart focused behind it).
 
 import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -30,44 +41,115 @@ import {
 import { Theme, alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PersonIcon from '@mui/icons-material/Person';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
-import { DataFormulatorState, dfActions, dfSelectors } from '../app/dfSlice';
+import { ChartUsageEntry, DataFormulatorState, dfActions, dfSelectors } from '../app/dfSlice';
 import { AppDispatch } from '../app/store';
 import {
-    HybridEdge, HybridGraph, HybridNode, PromptSource, ROOT_PREFIX, buildHybridGraph,
+    HybridEdge, HybridGraph, HybridNode, PromptSource, buildHybridGraph,
 } from '../app/analysisHybridGraph';
 import {
     SemanticChartItem, SemanticThreadsResult, collectSemanticChartItems, fetchSemanticThreads,
     semanticThreadsSignature,
 } from '../app/analysisSemanticThreads';
+import {
+    describeChartUsage, formatViewDuration, pushChartUsagePause, totalChartUsageMs,
+} from '../app/chartUsageTelemetry';
 import { getCachedChart } from '../app/chartCache';
+
+// ─── roles (who drove a chart) ───────────────────────────────────────────────
 
 // Prompt-source colors, matched to the data thread: the user's warm `custom`
 // palette (DataThread colors user entries with `palette.custom.main`) and the
 // agent's `primary` accent (the toy/summary color).
 const srcMain = (theme: Theme, source: PromptSource): string =>
-    source === 'user' ? theme.palette.custom.main
-        : source === 'agent' ? theme.palette.primary.main
-            : theme.palette.text.secondary;
+    source === 'agent' ? theme.palette.primary.main : theme.palette.custom.main;
 const srcText = (theme: Theme, source: PromptSource): string =>
-    source === 'user' ? (theme.palette.custom.textColor || theme.palette.custom.main)
-        : source === 'agent' ? (theme.palette.primary.textColor || theme.palette.primary.main)
-            : theme.palette.text.secondary;
+    source === 'agent' ? (theme.palette.primary.textColor || theme.palette.primary.main)
+        : (theme.palette.custom.textColor || theme.palette.custom.main);
 
-/** Small person/robot glyph marking whether a prompt was authored by the user
- *  or the agent, tinted in that source's thread color. */
+/** A chart with no prompt behind it was built manually — still the user. */
+const roleLabel = (source: PromptSource): string => (source === 'agent' ? 'Agent' : 'User');
+const sourceLabel = (source: PromptSource): string =>
+    source === 'user' ? 'Driven by a user prompt'
+        : source === 'agent' ? 'Initiated by the agent'
+            : 'Built manually by the user';
+
+/** Small person/robot glyph tinted in the role's thread color. */
 const SourceIcon: FC<{ source: PromptSource; size?: number }> = ({ source, size = 12 }) => {
     const theme = useTheme();
     const color = srcMain(theme, source);
-    if (source === 'user') return <PersonIcon sx={{ fontSize: size, color, flexShrink: 0 }} />;
-    if (source === 'agent') return <SmartToyOutlinedIcon sx={{ fontSize: size, color, flexShrink: 0 }} />;
-    return null;
+    return source === 'agent'
+        ? <SmartToyOutlinedIcon sx={{ fontSize: size, color, flexShrink: 0 }} />
+        : <PersonIcon sx={{ fontSize: size, color, flexShrink: 0 }} />;
 };
 
-const sourceLabel = (source: PromptSource): string =>
-    source === 'user' ? 'User prompt' : source === 'agent' ? 'Agent instruction' : '';
+/** The obvious who-made-this marker: icon + "User"/"Agent" pill. */
+const RoleBadge: FC<{ source: PromptSource }> = ({ source }) => {
+    const theme = useTheme();
+    const color = srcMain(theme, source);
+    return (
+        <Tooltip title={sourceLabel(source)}>
+            <Box sx={{
+                display: 'inline-flex', alignItems: 'center', gap: '3px', flexShrink: 0,
+                padding: '0px 6px 0px 4px', borderRadius: '9px', lineHeight: '15px',
+                backgroundColor: alpha(color, 0.1), border: `1px solid ${alpha(color, 0.35)}`,
+                color: srcText(theme, source), fontSize: 9.5, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: 0.3,
+            }}>
+                {source === 'agent'
+                    ? <SmartToyOutlinedIcon sx={{ fontSize: 11 }} />
+                    : <PersonIcon sx={{ fontSize: 11 }} />}
+                {roleLabel(source)}
+            </Box>
+        </Tooltip>
+    );
+};
+
+// ─── viewing-time chips (chart usage telemetry) ──────────────────────────────
+
+/** Compact dwell-time chip; background heat = share of the most-viewed chart.
+ *  Neutral gray on purpose — hues here belong to roles and topics. */
+const UsageChip: FC<{ entry?: ChartUsageEntry; maxMs: number }> = ({ entry, maxMs }) => {
+    const theme = useTheme();
+    const ms = entry?.focusMs ?? 0;
+    const share = maxMs > 0 ? ms / maxMs : 0;
+    return (
+        <Tooltip title={describeChartUsage(entry)}>
+            <Box sx={{
+                display: 'inline-flex', alignItems: 'center', gap: '3px', flexShrink: 0,
+                padding: '0px 6px', borderRadius: '9px', lineHeight: '15px',
+                backgroundColor: alpha(theme.palette.text.primary, ms > 0 ? 0.06 + 0.22 * share : 0.03),
+                color: ms > 0 ? 'text.secondary' : 'text.disabled',
+                fontSize: 10, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+            }}>
+                <AccessTimeIcon sx={{ fontSize: 11 }} />
+                {ms > 0 ? formatViewDuration(ms, 'compact') : '—'}
+            </Box>
+        </Tooltip>
+    );
+};
+
+/** Legend strip shown under the dialog title — one line explaining the two
+ *  role colors and the time chips, shared by both modes. */
+const GraphLegend: FC = () => {
+    const theme = useTheme();
+    const item = (icon: React.ReactNode, text: string) => (
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+            {icon}
+            <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{text}</Typography>
+        </Box>
+    );
+    return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 3, pb: 1, flexShrink: 0 }}>
+            {item(<PersonIcon sx={{ fontSize: 13, color: theme.palette.custom.main }} />, 'User-driven')}
+            {item(<SmartToyOutlinedIcon sx={{ fontSize: 13, color: theme.palette.primary.main }} />, 'Agent-driven')}
+            {item(<AccessTimeIcon sx={{ fontSize: 12, color: 'text.secondary' }} />, 'time actively viewed (darker = more)')}
+        </Box>
+    );
+};
 
 // ─── side-panel chart preview ────────────────────────────────────────────────
 
@@ -103,31 +185,46 @@ const ChartPreview: FC<{ chartId: string; chartType: string; height?: number }> 
     );
 };
 
-/** Side-panel entry for one chart: name, preview, and a way out to the canvas. */
+/** Side-panel entry for one chart: name, role, preview, viewing time, and a
+ *  way out to the canvas. */
 const ChartPanelCard: FC<{
     num: number; title: string; chartType: string; chartId: string;
-    accent: string; onOpen: () => void; children?: React.ReactNode;
-}> = ({ num, title, chartType, chartId, accent, onOpen, children }) => (
-    <Box sx={{
-        p: 1, border: t => `1px solid ${t.palette.divider}`, borderRadius: 1,
-        display: 'flex', flexDirection: 'column', gap: 0.75,
-    }}>
-        <Typography variant="body2" sx={{ fontWeight: 550, lineHeight: 1.3 }}>
-            <span style={{ color: accent, fontWeight: 700 }}>#{num}</span>&nbsp;{title}
-        </Typography>
-        <ChartPreview chartId={chartId} chartType={chartType} />
-        {children}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-            <Typography variant="caption" color="text.secondary">{chartType}</Typography>
-            <Button size="small" onClick={onOpen}
-                sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, py: 0 }}>
-                Open on canvas →
-            </Button>
+    accent: string; role?: PromptSource; usage?: ChartUsageEntry;
+    onOpen: () => void; children?: React.ReactNode;
+}> = ({ num, title, chartType, chartId, accent, role, usage, onOpen, children }) => {
+    const theme = useTheme();
+    return (
+        <Box sx={{
+            p: 1, border: t => `1px solid ${t.palette.divider}`, borderRadius: 1,
+            borderLeft: role !== undefined ? `3px solid ${srcMain(theme, role)}` : undefined,
+            display: 'flex', flexDirection: 'column', gap: 0.75,
+        }}>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+                <Typography variant="body2" sx={{ fontWeight: 550, lineHeight: 1.3, flex: 1, minWidth: 0 }}>
+                    <span style={{ color: accent, fontWeight: 700 }}>#{num}</span>&nbsp;{title}
+                </Typography>
+                {role !== undefined && <RoleBadge source={role} />}
+            </Box>
+            <ChartPreview chartId={chartId} chartType={chartType} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
+                <AccessTimeIcon sx={{ fontSize: 12 }} />
+                <Typography variant="caption">{describeChartUsage(usage)}</Typography>
+            </Box>
+            {children}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">{chartType}</Typography>
+                <Button size="small" onClick={onOpen}
+                    sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, py: 0 }}>
+                    Open on canvas →
+                </Button>
+            </Box>
         </Box>
-    </Box>
-);
+    );
+};
 
-const NW = 228, GX = 260, GY = 184, PAD = 40;
+// ─── Structure mode layout ───────────────────────────────────────────────────
+
+const NW = 228, GX = 260, GY = 192, PAD = 40;
 const ROOT_H = 38, ROOT_W = 168;
 const MAX_TITLES = 3, MAX_LOOPS = 2;
 const LABEL_W = 210;
@@ -137,7 +234,7 @@ const nodeHeight = (n: HybridNode, loops: number): number => {
     if (n.isRoot) return ROOT_H;
     const titleLines = Math.min(n.charts.length, MAX_TITLES);
     const loopLines = Math.min(loops, MAX_LOOPS);
-    return 14 + titleLines * 17 + 15 + loopLines * 15 + (n.charts.length > MAX_TITLES ? 13 : 0);
+    return 18 + titleLines * 18 + 15 + loopLines * 15 + (n.charts.length > MAX_TITLES ? 13 : 0);
 };
 
 interface Placed { node: HybridNode; x: number; y: number; h: number; }
@@ -197,15 +294,18 @@ const COL_W = 252;
  *  model's narrative order, linked by a vertical spine. */
 const SemanticThreadsView: FC<{
     result: SemanticThreadsResult;
+    usage: Record<string, ChartUsageEntry> | undefined;
+    maxUsageMs: number;
     selectedChartId: string | null;
     onSelectChart: (chartId: string) => void;
-}> = ({ result, selectedChartId, onSelectChart }) => {
+}> = ({ result, usage, maxUsageMs, selectedChartId, onSelectChart }) => {
     const theme = useTheme();
     const border = theme.palette.divider;
     return (
         <Box sx={{ display: 'flex', gap: 3, p: 2.5, alignItems: 'flex-start' }}>
             {result.threads.map((t, ti) => {
                 const hue = threadHue(ti, t.isFallback) ?? theme.palette.text.disabled;
+                const threadMs = totalChartUsageMs(usage, t.charts.map(c => c.chartId));
                 return (
                     <Box key={ti} sx={{ width: COL_W, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
                         <Tooltip title={t.summary} placement="top">
@@ -218,6 +318,7 @@ const SemanticThreadsView: FC<{
                                 </Typography>
                                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
                                     {t.charts.length} chart{t.charts.length > 1 ? 's' : ''}
+                                    {threadMs > 0 && ` · ${formatViewDuration(threadMs, 'compact')} viewed`}
                                     {t.isFallback ? ' · unassigned' : ''}
                                 </Typography>
                             </Box>
@@ -228,42 +329,50 @@ const SemanticThreadsView: FC<{
                                 padding: '6px 2px 2px', lineHeight: 1.35,
                             }}>{t.summary}</Typography>
                         )}
-                        {t.charts.map((c, ci) => (
-                            <React.Fragment key={c.chartId}>
-                                {/* spine segment between consecutive charts */}
-                                <Box sx={{
-                                    width: 0, alignSelf: 'center', height: ci === 0 ? 10 : 22,
-                                    borderLeft: `2px solid ${alpha(hue, 0.55)}`,
-                                }} />
-                                <Box onClick={() => onSelectChart(c.chartId)}
-                                    title={c.prompt ? `Prompt: ${c.prompt}` : undefined}
-                                    sx={{
-                                        border: `${selectedChartId === c.chartId ? 2 : 1}px solid ${
-                                            selectedChartId === c.chartId ? hue : border}`,
-                                        borderRadius: 2, cursor: 'pointer',
-                                        backgroundColor: 'background.paper', padding: '8px 10px',
-                                        display: 'flex', flexDirection: 'column', gap: 0.25,
-                                        '&:hover': { borderColor: hue, boxShadow: `0 1px 5px ${alpha(hue, 0.3)}` },
-                                    }}>
-                                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
-                                        <span style={{ color: hue, fontWeight: 700 }}>#{c.num}</span>&nbsp;{c.title}
-                                    </Typography>
-                                    <Typography sx={{
-                                        fontSize: 10.5, color: 'text.disabled', whiteSpace: 'nowrap',
-                                        overflow: 'hidden', textOverflow: 'ellipsis',
-                                    }}>{`{ ${c.attributes.join(', ')} }`}</Typography>
-                                    {c.prompt && (
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                                            <SourceIcon source={c.promptSource} size={11} />
+                        {t.charts.map((c, ci) => {
+                            const sel = selectedChartId === c.chartId;
+                            return (
+                                <React.Fragment key={c.chartId}>
+                                    {/* spine segment between consecutive charts */}
+                                    <Box sx={{
+                                        width: 0, alignSelf: 'center', height: ci === 0 ? 10 : 22,
+                                        borderLeft: `2px solid ${alpha(hue, 0.55)}`,
+                                    }} />
+                                    <Box onClick={() => onSelectChart(c.chartId)}
+                                        title={c.prompt ? `${sourceLabel(c.promptSource)}: ${c.prompt}` : sourceLabel(c.promptSource)}
+                                        sx={{
+                                            border: `${sel ? 2 : 1}px solid ${sel ? hue : border}`,
+                                            borderLeft: `3px solid ${srcMain(theme, c.promptSource)}`,
+                                            borderRadius: 2, cursor: 'pointer',
+                                            backgroundColor: 'background.paper', padding: '8px 10px',
+                                            display: 'flex', flexDirection: 'column', gap: 0.5,
+                                            '&:hover': { borderColor: hue, borderLeftColor: srcMain(theme, c.promptSource), boxShadow: `0 1px 5px ${alpha(hue, 0.3)}` },
+                                        }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                            <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: hue, lineHeight: 1 }}>
+                                                #{c.num}
+                                            </Typography>
+                                            <RoleBadge source={c.promptSource} />
+                                            <Box sx={{ flex: 1 }} />
+                                            <UsageChip entry={usage?.[c.chartId]} maxMs={maxUsageMs} />
+                                        </Box>
+                                        <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
+                                            {c.title}
+                                        </Typography>
+                                        <Typography sx={{
+                                            fontSize: 10.5, color: 'text.disabled', whiteSpace: 'nowrap',
+                                            overflow: 'hidden', textOverflow: 'ellipsis',
+                                        }}>{`{ ${c.attributes.join(', ')} }`}</Typography>
+                                        {c.prompt && (
                                             <Typography sx={{
                                                 fontSize: 10.5, fontStyle: 'italic', color: 'text.secondary',
                                                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                            }}>{c.prompt}</Typography>
-                                        </Box>
-                                    )}
-                                </Box>
-                            </React.Fragment>
-                        ))}
+                                            }}>“{c.prompt}”</Typography>
+                                        )}
+                                    </Box>
+                                </React.Fragment>
+                            );
+                        })}
                     </Box>
                 );
             })}
@@ -282,10 +391,18 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
     const tables = useSelector((s: DataFormulatorState) => s.tables);
     const charts = useSelector(dfSelectors.getAllCharts);
     const conceptShelfItems = useSelector((s: DataFormulatorState) => s.conceptShelfItems);
+    const chartUsage = useSelector((s: DataFormulatorState) => s.chartUsage);
     const activeModel = useSelector(dfSelectors.getActiveModel);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
     const [mode, setMode] = useState<GraphMode>('topics');
+
+    // Facilitator reading the graph ≠ analyst viewing the chart behind the
+    // modal: suspend usage tracking while open (numbers also hold still).
+    useEffect(() => {
+        if (!open) return;
+        return pushChartUsagePause();
+    }, [open]);
 
     const graph = useMemo(
         () => (open ? buildHybridGraph(tables, charts, conceptShelfItems) : null),
@@ -301,11 +418,22 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
     }, [graph]);
     const placed = useMemo(() => (graph ? layout(graph, loopsByNode) : null), [graph, loopsByNode]);
 
-    // ── topics mode: LLM clustering, cached per chart-set signature ──────────
+    // ── chart items (both modes): numbering, roles, usage rollups ────────────
     const items = useMemo<SemanticChartItem[]>(
         () => (open ? collectSemanticChartItems(tables, charts, conceptShelfItems) : []),
         [open, tables, charts, conceptShelfItems],
     );
+    const roleByChart = useMemo(() => new Map(items.map(i => [i.chartId, i.promptSource])), [items]);
+    const maxUsageMs = useMemo(
+        () => items.reduce((mx, i) => Math.max(mx, chartUsage?.[i.chartId]?.focusMs ?? 0), 0),
+        [items, chartUsage],
+    );
+    const totalUsageMs = useMemo(
+        () => totalChartUsageMs(chartUsage, items.map(i => i.chartId)),
+        [items, chartUsage],
+    );
+
+    // ── topics mode: LLM clustering, cached per chart-set signature ──────────
     const sig = useMemo(() => semanticThreadsSignature(items), [items]);
     const [semantic, setSemantic] = useState<{ sig: string; result: SemanticThreadsResult } | null>(null);
     const [semanticLoading, setSemanticLoading] = useState(false);
@@ -369,10 +497,17 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
         : null;
     const selectedItem = selectedTopic?.charts.find(c => c.chartId === selectedChartId) ?? null;
 
+    const totalViewedChip = totalUsageMs > 0 && (
+        <Tooltip title="Total active viewing time across all charts (visible tab, non-idle)">
+            <Chip size="small" icon={<AccessTimeIcon sx={{ fontSize: 13 }} />}
+                label={`${formatViewDuration(totalUsageMs)} viewed`} />
+        </Tooltip>
+    );
+
     return (
         <Dialog open={open} onClose={onClose} maxWidth={false}
             sx={{ '& .MuiDialog-paper': { width: '92vw', maxWidth: '92vw', height: '88vh', display: 'flex', flexDirection: 'column' } }}>
-            <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pb: 1 }}>
+            <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pb: 0.5 }}>
                 <Typography component="span" sx={{ fontWeight: 600 }}>Analysis graph</Typography>
                 <ToggleButtonGroup size="small" exclusive value={mode}
                     onChange={(_, v) => { if (v) setMode(v); }}
@@ -387,11 +522,13 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                             <Chip size="small" label={`${m.threadCount} threads`} />
                             <Chip size="small" label={`depth ${m.maxDepth}`} />
                             {m.selfLoops > 0 && <Chip size="small" label={`↻ ${m.selfLoops}`} />}
+                            {totalViewedChip}
                         </>
                     ) : sm && (
                         <>
                             <Chip size="small" label={`${sm.threadCount} topics · ${sm.chartCount} charts`} />
                             <Chip size="small" label={`deepest ${sm.maxThreadLength}`} />
+                            {totalViewedChip}
                             <Tooltip title="Re-cluster with the model">
                                 <span>
                                     <IconButton size="small" disabled={semanticLoading} onClick={() => runClustering(true)}>
@@ -404,6 +541,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                 </Box>
                 <IconButton onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
             </DialogTitle>
+            <GraphLegend />
             {mode === 'topics' ? (
                 <DialogContent sx={{ flex: 1, display: 'flex', gap: 2, overflow: 'hidden', pt: 0 }}>
                     <Box sx={{ flex: 1, overflow: 'auto', border: `1px solid ${border}`, borderRadius: 1, backgroundColor: theme.palette.action.hover }}>
@@ -430,8 +568,8 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 <Button size="small" variant="outlined" onClick={() => runClustering(true)}>Retry</Button>
                             </Box>
                         ) : semResult ? (
-                            <SemanticThreadsView result={semResult} selectedChartId={selectedChartId}
-                                onSelectChart={setSelectedChartId} />
+                            <SemanticThreadsView result={semResult} usage={chartUsage} maxUsageMs={maxUsageMs}
+                                selectedChartId={selectedChartId} onSelectChart={setSelectedChartId} />
                         ) : null}
                     </Box>
                     <Box sx={{ width: 330, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -443,6 +581,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 <ChartPanelCard num={selectedItem.num} title={selectedItem.title}
                                     chartType={selectedItem.chartType} chartId={selectedItem.chartId}
                                     accent={threadHue(semResult!.threads.indexOf(selectedTopic), selectedTopic.isFallback) ?? blue}
+                                    role={selectedItem.promptSource} usage={chartUsage?.[selectedItem.chartId]}
                                     onOpen={() => openOnCanvas(selectedItem.chartId)}>
                                     {selectedItem.prompt && (
                                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
@@ -477,6 +616,11 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                     analysis was and the length of a column is how <b>deep</b> it went.
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
+                                    A card's colored edge and badge say <b>who drove it</b> (user or agent); the gray
+                                    clock chip is how long it was <b>actively viewed</b> on the canvas — darker means
+                                    more of the session's attention.
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
                                     Select a chart to preview it here.
                                 </Typography>
                             </>
@@ -502,6 +646,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 <g key={`e-${node.id}`}>
                                     <path d={treeEdge(px, pB, cx, y)} fill="none" stroke={blue}
                                         strokeWidth={1.4} opacity={0.5} strokeDasharray={dashed ? '4 3' : undefined} />
+                                    {birth.label && (
                                     <foreignObject x={cx - LABEL_W / 2} y={midY - 27} width={LABEL_W} height={54}>
                                         <div title={`${sourceLabel(birth.source)} · ${birth.full}`} style={{
                                             display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%',
@@ -510,7 +655,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                                 display: 'inline-flex', alignItems: 'center', gap: 0.5,
                                                 fontSize: 11, lineHeight: 1.25, color: srcText(theme, birth.source),
                                                 backgroundColor: 'background.paper',
-                                                border: `1px solid ${birth.source ? alpha(srcMain(theme, birth.source), 0.5) : border}`,
+                                                border: `1px solid ${alpha(srcMain(theme, birth.source), 0.5)}`,
                                                 borderRadius: '6px', padding: '3px 8px', maxWidth: '100%',
                                             }}>
                                                 <SourceIcon source={birth.source} />
@@ -521,6 +666,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                             </Box>
                                         </div>
                                     </foreignObject>
+                                    )}
                                 </g>
                             );
                         })}
@@ -546,6 +692,10 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                             const sel = selectedId === node.id;
                             const loops = loopsByNode.get(node.id) || [];
                             const extraTitles = node.charts.length - MAX_TITLES;
+                            // One role edge when every chart in the state agrees; mixed states rely on per-row icons.
+                            const nodeRoles = new Set(node.charts.map(c => roleByChart.get(c.chartId) === 'agent' ? 'agent' : 'user'));
+                            const roleEdgeColor = nodeRoles.size === 1
+                                ? srcMain(theme, [...nodeRoles][0] as PromptSource) : border;
                             return (
                                 <foreignObject key={node.id} x={x} y={y} width={NW} height={h}>
                                     <div onClick={() => setSelectedId(node.id)}
@@ -553,17 +703,36 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                             height: '100%', boxSizing: 'border-box', cursor: 'pointer',
                                             borderRadius: 8, backgroundColor: theme.palette.background.paper,
                                             border: `${sel ? 2 : 1}px solid ${sel ? blue : border}`,
-                                            padding: '7px 9px', display: 'flex', flexDirection: 'column', gap: 2,
+                                            borderLeft: `3px solid ${roleEdgeColor}`,
+                                            padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2,
                                             overflow: 'hidden',
                                         }}>
-                                        {node.charts.slice(0, MAX_TITLES).map(c => (
-                                            <span key={c.chartId} style={{
-                                                fontSize: 12, fontWeight: 600, color: theme.palette.text.primary,
-                                                lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                            }}>
-                                                <b style={{ color: blue, fontWeight: 700 }}>#{c.num}</b>&nbsp;{c.title}
-                                            </span>
-                                        ))}
+                                        {node.charts.slice(0, MAX_TITLES).map(c => {
+                                            const cRole = roleByChart.get(c.chartId) ?? null;
+                                            const cUsage = chartUsage?.[c.chartId];
+                                            return (
+                                                <div key={c.chartId} title={`${sourceLabel(cRole)} · ${describeChartUsage(cUsage)}`}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                                                    <b style={{ fontSize: 12.5, color: blue, fontWeight: 700, flexShrink: 0 }}>#{c.num}</b>
+                                                    <SourceIcon source={cRole} size={11} />
+                                                    <span style={{
+                                                        flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600,
+                                                        color: theme.palette.text.primary, lineHeight: 1.25,
+                                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                                    }}>{c.title}</span>
+                                                    {(cUsage?.focusMs ?? 0) > 0 && (
+                                                        <span style={{
+                                                            flexShrink: 0, fontSize: 10, fontWeight: 600,
+                                                            fontVariantNumeric: 'tabular-nums',
+                                                            color: theme.palette.text.secondary,
+                                                            backgroundColor: alpha(theme.palette.text.primary,
+                                                                0.06 + 0.22 * (maxUsageMs > 0 ? (cUsage!.focusMs / maxUsageMs) : 0)),
+                                                            borderRadius: 8, padding: '0 5px', lineHeight: '14px',
+                                                        }}>{formatViewDuration(cUsage!.focusMs, 'compact')}</span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                         {extraTitles > 0 && (
                                             <span style={{ fontSize: 10.5, color: theme.palette.text.disabled }}>+{extraTitles} more</span>
                                         )}
@@ -606,6 +775,7 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                             {selected.charts.map(c => (
                                 <ChartPanelCard key={c.chartId} num={c.num} title={c.title}
                                     chartType={c.chartType} chartId={c.chartId} accent={blue}
+                                    role={roleByChart.get(c.chartId) ?? null} usage={chartUsage?.[c.chartId]}
                                     onOpen={() => openOnCanvas(c.chartId)} />
                             ))}
                             {(loopsByNode.get(selected.id) || []).length > 0 && (
@@ -629,6 +799,11 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
                                 question or instruction — that moved the analysis from one set to the next. A ↻ line is a
                                 set refined in place; a new thread from the dataset starts whenever a question is unrelated
                                 to the previous one.
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                                A node's colored edge and the icons on its rows say <b>who drove each chart</b> (user or
+                                agent); the gray clock chips are how long each was <b>actively viewed</b> — darker means
+                                more of the session's attention.
                             </Typography>
                             <Typography variant="subtitle2" sx={{ mt: 1 }}>Threads</Typography>
                             {graph.rootIds.map(rid => {

@@ -83,12 +83,14 @@ export interface HybridGraph {
 
 const stripMarkers = (s: string): string => s.replace(/\*\*([^*]+)\*\*/g, '$1');
 
-/** The prompt that drove a step: the user's question, else the agent's instruction. */
+/** The prompt that drove a step: the user's question, else the agent's instruction.
+ *  Legacy sessions (and the bundled demos) recorded user asks as role
+ *  'instruction'; anything `from: 'user'` is a user prompt regardless. */
 export const promptOfTable = (t: DictTable | undefined): { text: string; source: PromptSource } => {
     const inter = t?.derive?.trigger?.interaction as InteractionEntry[] | undefined;
     let userPrompt = '', agentInstruction = '';
     for (const e of inter || []) {
-        if (e.from === 'user' && e.role === 'prompt' && !userPrompt) {
+        if (e.from === 'user' && (e.role === 'prompt' || e.role === 'instruction') && !userPrompt) {
             userPrompt = stripMarkers((e.displayContent || e.content || '').replace(/\s+/g, ' ').trim());
         } else if (e.from !== 'user' && e.role === 'instruction') {
             agentInstruction = stripMarkers((e.displayContent || e.content || '').replace(/\s+/g, ' ').trim());
