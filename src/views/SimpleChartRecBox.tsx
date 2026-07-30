@@ -618,17 +618,23 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         completedStepCount: number;
         actionId: string;
         lastCreatedTableId: string | null;
-    }, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst') => {
+        analysisMode?: 'executor' | 'analyst' | 'analyst_guided';
+    }, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst' | 'analyst_guided') => {
         if (!focusedTableId || (!clarificationContext && prompt.trim() === "")) return;
 
         // Resolve the study behavioral profile. The power button passes an explicit
-        // 'analyst' override (delegation). Otherwise only the 'executor' condition
-        // constrains typed instructions to executor mode; the 'default' and 'analyst'
-        // conditions send no analysis_mode, so typed chat uses the normal agent
-        // (the "choosing what to do" taxonomy) — in the analyst condition the power
-        // button is the way to hand the analysis over, not typed chat.
-        const analysisMode: 'executor' | 'analyst' | undefined =
-            analysisModeOverride ?? (config.studyCondition === 'executor' ? 'executor' : undefined);
+        // 'analyst' override (full delegation). A resume re-enters the paused run's
+        // mode. Otherwise the condition decides typed chat: 'executor' constrains
+        // it to executor mode; 'analyst' sends 'analyst_guided' (anchor on the
+        // instruction, then always extend the exploration beyond it); 'default'
+        // sends no analysis_mode, so typed chat uses the normal agent (the
+        // "choosing what to do" taxonomy).
+        const analysisMode: 'executor' | 'analyst' | 'analyst_guided' | undefined =
+            analysisModeOverride
+            ?? clarificationContext?.analysisMode
+            ?? (config.studyCondition === 'executor' ? 'executor'
+                : config.studyCondition === 'analyst' ? 'analyst_guided'
+                : undefined);
 
         // Fold attached reference files into the prompt the agent sees, while
         // keeping the timeline bubble (displayContent) clean for the user.
@@ -698,9 +704,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             max_iterations: 10,
             agent_mode: config.miniMode ? 'mini' : 'standard',
             // User-study behavioral profile. Omitted in the 'default' condition so
-            // the backend runs its existing path; otherwise 'executor' (typed) or
-            // 'analyst' (power button). The backend maps this to the action budget
-            // + exploration rules (source of truth).
+            // the backend runs its existing path; otherwise 'executor' (typed, in
+            // the executor condition), 'analyst_guided' (typed, in the analyst
+            // condition), or 'analyst' (power button). The backend maps this to
+            // the action budget + exploration rules (source of truth).
             ...(analysisMode ? { analysis_mode: analysisMode } : {}),
         };
 
@@ -1256,6 +1263,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         trajectory: result.trajectory || [],
                         completedStepCount: result.completed_step_count || 0,
                         lastCreatedTableId,
+                        ...(analysisMode ? { analysisMode } : {}),
                     }}));
                     // Don't change the user's focus — they may have been looking
                     // at a chart and the clarify/explain pause shouldn't yank
@@ -1331,6 +1339,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         trajectory: result.trajectory || [],
                         completedStepCount: result.completed_step_count || 0,
                         lastCreatedTableId,
+                        ...(analysisMode ? { analysisMode } : {}),
                     }}));
                 }
                 setIsChatFormulating(false);
@@ -1550,7 +1559,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     }, [agentHandoffRequest]);
 
     // ── Unified submit handler ───────────────────────────────────────
-    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst') => {
+    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst' | 'analyst_guided') => {
         if (clarificationCtx) {
             // Build the structured response payload. The backend assembles
             // the final LLM-facing text ("Selected answers: 1. xxx; 2. yyy\n

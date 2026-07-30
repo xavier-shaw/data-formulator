@@ -1226,10 +1226,11 @@ class AnalystAgent:
         # core is the always-active baseline, gated skills announce themselves when
         # loaded.
         core_body = self.registry.load_body(_CORE_SKILL)
-        # Per-mode swap of the analytical-policy section only (executor mode). The
-        # execution machinery that follows it (Chart Creation Guide, chart-type
-        # table, …) is left untouched. DEFAULT/Analyst leave taxonomy_override empty,
-        # so core_body is unmodified and the prompt is byte-identical to today.
+        # Per-mode swap of the analytical-policy section only (executor / analyst /
+        # analyst_guided). The execution machinery that follows it (Chart Creation
+        # Guide, chart-type table, …) is left untouched. Default leaves
+        # taxonomy_override empty, so core_body is unmodified and the prompt is
+        # byte-identical to today.
         if self.prompt_profile.taxonomy_override:
             core_body = _swap_section(
                 core_body, "## Choosing what to do", "## Chart Creation Guide",

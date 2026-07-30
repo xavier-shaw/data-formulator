@@ -6,6 +6,22 @@ and then **autonomously take a couple more exploration steps by default** — ex
 *for* the user — so the ANALYST vs EXECUTOR contrast is sharp regardless of how the
 participant phrases things.
 
+> **STATUS (2026-07-23): Phase 1 implemented — as a separate mode, not a
+> rewrite of `analyst.md`.** Typed chat in the analyst condition now routes to a
+> new `analysis_mode: 'analyst_guided'` (`modes/analyst_guided.md`, budget 8):
+> anchor on the user's instruction (produce the asked-for chart first), then
+> always extend beyond it along that direction, climbing the Lundgard 4-level
+> ladder (encoded → statistical → perceptual → contextual); open-ended input
+> explores instead of parking. The power button keeps the unchanged full
+> `'analyst'` delegation, so the two sub-behaviors stay independently tunable.
+> Touched: `SimpleChartRecBox.tsx` (mode resolution at `exploreFromChat`; pause
+> state now carries `analysisMode` so resumes re-enter the paused run's mode),
+> `ComponentType.tsx` (`PendingClarification.analysisMode`),
+> `routes/agents.py` (gate accepts `analyst_guided`), plus the §1c comment
+> fixes. Smoke-tested live: concrete typed ask → 3-chart anchored thread +
+> closing synthesis; vague typed ask → explores (no clarify-park); button →
+> `analysis_mode=analyst` unchanged. Phase 2 telemetry/pilot not started.
+
 ---
 
 ## 1. The root cause (the thing to fix first)

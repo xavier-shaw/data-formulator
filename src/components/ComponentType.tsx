@@ -85,6 +85,10 @@ export interface PendingClarification {
     trajectory: any[];
     completedStepCount: number;
     lastCreatedTableId: string | null;
+    // Study behavioral profile of the paused run, so resuming re-enters the
+    // same mode (a button-delegated 'analyst' run must not resume as typed-chat
+    // 'analyst_guided', and vice versa). Absent on runs from older sessions.
+    analysisMode?: 'executor' | 'analyst' | 'analyst_guided';
 }
 
 export interface DraftNode {

@@ -4,8 +4,10 @@
 """Per-mode prompt definitions for the analyst agent (user study).
 
 Each study mode is a single markdown file in this package — ``default.md``,
-``executor.md``, ``analyst.md`` — so a mode's whole behavior can be read and
-edited in one place. A file carries YAML frontmatter (``name``, optional
+``executor.md``, ``analyst.md``, ``analyst_guided.md`` — so a mode's whole
+behavior can be read and edited in one place. (``analyst`` is the Analyst
+condition's power-button delegation; ``analyst_guided`` is that condition's
+typed chat — anchored on the instruction, always extending beyond it.) A file carries YAML frontmatter (``name``, optional
 ``max_iterations``) plus H1 sections that fill the three per-mode prompt spans:
 
     # Identity            -> {agent_identity} slot
