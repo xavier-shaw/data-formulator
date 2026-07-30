@@ -40,7 +40,6 @@ import {
 } from '@mui/material';
 import { Theme, alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
-import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PersonIcon from '@mui/icons-material/Person';
@@ -823,25 +822,5 @@ export const AnalysisGraphDialog: FC<{ open: boolean; onClose: () => void }> = (
             </DialogContent>
             )}
         </Dialog>
-    );
-};
-
-/** Floating opener for the thread pane. */
-export const AnalysisGraphButton: FC = () => {
-    const [open, setOpen] = useState(false);
-    const chartCount = useSelector((s: DataFormulatorState) => dfSelectors.getAllCharts(s).length);
-    if (chartCount === 0) return null;
-    return (
-        <>
-            <Tooltip title="Show analysis graph" placement="right">
-                <IconButton size="small" onClick={() => setOpen(true)}
-                    sx={{ position: 'absolute', top: 6, left: 6, zIndex: 5, color: 'text.secondary',
-                        backgroundColor: 'background.paper', border: 1, borderColor: 'divider',
-                        '&:hover': { color: 'primary.main' } }}>
-                    <AccountTreeOutlinedIcon sx={{ fontSize: 18 }} />
-                </IconButton>
-            </Tooltip>
-            <AnalysisGraphDialog open={open} onClose={() => setOpen(false)} />
-        </>
     );
 };

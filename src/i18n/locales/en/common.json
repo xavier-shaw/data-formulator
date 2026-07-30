@@ -120,8 +120,10 @@
     "studyModeAnalyst": "Analyst"
   },
   "analysisGraph": {
-    "title": "Analysis tree",
-    "openTooltip": "Analysis tree — the session as analysis states",
+    "title": "Analysis graph",
+    "openTooltip": "Analysis graph — the session as analysis states",
+    "openButton": "Open analysis graph",
+    "noChartsHint": "Available once the session has charts to lay out.",
     "statesOfCharts": "{{states}} states from {{charts}} charts",
     "depth": "depth {{depth}}",
     "trajectories": "{{count}} trajectories",

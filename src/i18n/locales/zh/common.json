@@ -120,8 +120,10 @@
     "studyModeAnalyst": "分析师"
   },
   "analysisGraph": {
-    "title": "分析树",
-    "openTooltip": "分析树——以分析状态查看本次会话",
+    "title": "分析图",
+    "openTooltip": "分析图——以分析状态查看本次会话",
+    "openButton": "打开分析图",
+    "noChartsHint": "会话中有图表后即可使用。",
     "statesOfCharts": "{{charts}} 个图表 → {{states}} 个状态",
     "depth": "深度 {{depth}}",
     "trajectories": "{{count}} 条探索线",

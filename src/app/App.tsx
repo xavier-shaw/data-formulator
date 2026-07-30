@@ -66,6 +66,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import ClearIcon from '@mui/icons-material/Clear';
 
 import { DataFormulatorFC } from '../views/DataFormulator';
+import { AnalysisGraphDialog } from '../views/AnalysisGraphView';
 import { useAutoSave } from './useAutoSave';
 import { useChartUsageTracker } from './chartUsageTelemetry';
 import { useWorkspaceAutoName } from './useWorkspaceAutoName';
@@ -73,6 +74,7 @@ import { useWorkspaceAutoName } from './useWorkspaceAutoName';
 import GridViewIcon from '@mui/icons-material/GridView';
 import ViewSidebarIcon from '@mui/icons-material/ViewSidebar';
 import SettingsIcon from '@mui/icons-material/Settings';
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import {
     createBrowserRouter,
     Link as RouterLink,
@@ -482,9 +484,13 @@ const ExitSessionButton: React.FC = () => {
 
 const ConfigDialog: React.FC = () => {
     const [open, setOpen] = useState(false);
+    // The analysis graph opens from here, but is not a setting: it is an action,
+    // so it stays out of hasChanges / Apply / reset-to-default below.
+    const [graphOpen, setGraphOpen] = useState(false);
     const dispatch = useDispatch();
     const { t } = useTranslation();
     const config = useSelector((state: DataFormulatorState) => state.config);
+    const chartCount = useSelector((s: DataFormulatorState) => dfSelectors.getAllCharts(s).length);
     const isEphemeral = useSelector((state: DataFormulatorState) => state.serverConfig?.WORKSPACE_BACKEND === 'ephemeral');
     const rowLimitDefault = isEphemeral ? DEFAULT_ROW_LIMIT_EPHEMERAL : DEFAULT_ROW_LIMIT;
     const rowLimitMax = DEFAULT_ROW_LIMIT;
@@ -709,6 +715,24 @@ const ConfigDialog: React.FC = () => {
                                     label={<Typography variant="body2">{t('config.studyModeAnalyst')}</Typography>} />
                             </RadioGroup>
                         </FormControl>
+                        <Divider><Typography variant="caption">{t('analysisGraph.title')}</Typography></Divider>
+                        <Box>
+                            <Button
+                                variant="outlined" size="small"
+                                startIcon={<AccountTreeOutlinedIcon sx={{ fontSize: 18 }} />}
+                                disabled={chartCount === 0}
+                                // Close settings first, then open the graph: the two are
+                                // separate dialogs, and ConfigDialog stays mounted (it owns
+                                // the toolbar button), so the graph outlives this one closing.
+                                onClick={() => { setOpen(false); setGraphOpen(true); }}
+                                sx={{ textTransform: 'none' }}
+                            >
+                                {t('analysisGraph.openButton')}
+                            </Button>
+                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                                {chartCount === 0 ? t('analysisGraph.noChartsHint') : t('analysisGraph.openTooltip')}
+                            </Typography>
+                        </Box>
                     </Box>
                 </DialogContent>
                 <DialogActions sx={{'.MuiButton-root': {textTransform: 'none'}}}>
@@ -738,8 +762,9 @@ const ConfigDialog: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+            <AnalysisGraphDialog open={graphOpen} onClose={() => setGraphOpen(false)} />
         </>
-    );  
+    );
 }
 
 const ErrorBoundaryFallback: React.FC = () => {

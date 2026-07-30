@@ -96,7 +96,6 @@ import CallMergeIcon from '@mui/icons-material/CallMerge';
 import { ViewBorderStyle, ComponentBorderStyle, transition, radius, borderColor } from '../app/tokens';
 
 import { SimpleChartRecBox } from './SimpleChartRecBox';
-import { AnalysisGraphButton } from './AnalysisGraphView';
 import { InteractionEntryCard, ResolvedConversationCard, getEntryGutterIcon, getDefaultGutterIcon, PlanStepsView } from './InteractionEntryCard';
 import { CARD_WIDTH, CARD_GAP, PANEL_PADDING, fittableThreadColumns } from './threadLayout';
 
@@ -3507,7 +3506,6 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                 }),
             }}
         >
-            <AnalysisGraphButton />
             <Box ref={containerRef} sx={{
                     overflow: 'hidden',
                     direction: 'rtl',
