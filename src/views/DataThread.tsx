@@ -876,6 +876,12 @@ let SingleThreadGroupView: FC<{
     }, [focusedId, charts]);
     let draftNodes = useSelector((state: DataFormulatorState) => state.draftNodes);
     let generatedReports = useSelector(dfSelectors.getAllGeneratedReports);
+    // Study conditions (Executor, Analyst) end a run at chart presentation:
+    // the agent's closing summary stays in state — it keeps feeding the
+    // agent's own cross-run context (buildThreadContext) — but is never
+    // rendered for the participant, so chart interpretation remains their job.
+    const hideAgentSummaries = useSelector((state: DataFormulatorState) =>
+        (state.config.studyCondition ?? 'default') !== 'default');
 
     // Build a map from tableId → reports triggered from that table
     const reportsByTriggerTable = useMemo(() => {
@@ -1242,6 +1248,13 @@ let SingleThreadGroupView: FC<{
         for (let ei = 0; ei < entries.length; ei++) {
             const entry = entries[ei];
             const nextEntry = ei + 1 < entries.length ? entries[ei + 1] : null;
+
+            // Study conditions: drop agent summaries before the fold rule
+            // below, so the text can't resurface inside an instruction's
+            // expandable thinking plan either.
+            if (hideAgentSummaries && entry.role === 'summary' && entry.from === 'data-agent') {
+                continue;
+            }
 
             // Collapse: summary from data-agent followed by instruction → fold into instruction's plan
             if (entry.role === 'summary' && entry.from === 'data-agent'
@@ -2489,14 +2502,17 @@ function estimateThreadHeight(
 /** Effective rendered row count for an interaction list: data-agent
  *  `summary` entries that are immediately followed by an `instruction` get
  *  folded into that instruction (see `pushInteractionEntries`), so they
- *  shouldn't be double-counted in height estimation. */
-function effectiveEntryCount(interaction: InteractionEntry[] | undefined): number {
+ *  shouldn't be double-counted in height estimation. In study conditions
+ *  (`hideAgentSummaries`) every agent summary is dropped from rendering,
+ *  so none of them count. */
+function effectiveEntryCount(interaction: InteractionEntry[] | undefined, hideAgentSummaries = false): number {
     if (!interaction || interaction.length === 0) return 1;
     let n = 0;
     for (let i = 0; i < interaction.length; i++) {
         const e = interaction[i];
         const next = interaction[i + 1];
-        if (e.role === 'summary' && e.from === 'data-agent' && next?.role === 'instruction') continue;
+        if (e.role === 'summary' && e.from === 'data-agent'
+            && (hideAgentSummaries || next?.role === 'instruction')) continue;
         n++;
     }
     return Math.max(1, n);
@@ -2544,6 +2560,7 @@ function computeSplitExtraLeaves(
     allTables: DictTable[],
     chartElements: { tableId: string }[],
     fittableColumns: number,
+    hideAgentSummaries = false,
 ): DictTable[] {
     if (fittableColumns <= 1) return [];
     const tableById = new Map(allTables.map(t => [t.id, t]));
@@ -2551,7 +2568,7 @@ function computeSplitExtraLeaves(
     // Per-trigger item count = 1 (table) + interaction entries + charts.
     const itemsForTrigger = (resultTableId: string, interaction: InteractionEntry[] | undefined): number => {
         const charts = chartElements.filter(ce => ce.tableId === resultTableId).length;
-        return 1 + effectiveEntryCount(interaction) + charts;
+        return 1 + effectiveEntryCount(interaction, hideAgentSummaries) + charts;
     };
 
     // Compute per-thread totals up front so we can pick the budget.
@@ -2892,6 +2909,10 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     let charts = useSelector(dfSelectors.getAllCharts);
 
     let generatedReports = useSelector(dfSelectors.getAllGeneratedReports);
+    // Mirrors SingleThreadGroupView: study conditions hide agent summary
+    // entries, so the split heuristics shouldn't count them either.
+    const hideAgentSummaries = useSelector((state: DataFormulatorState) =>
+        (state.config.studyCondition ?? 'default') !== 'default');
 
     // Derive focusedTableId from focusedId for scroll/highlight logic
     let focusedTableId = useMemo(() => {
@@ -3165,7 +3186,7 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     const computedExtras = fittableColumns <= 1
         ? []
         : computeSplitExtraLeaves(
-            leafTables, tables, chartElements, fittableColumns,
+            leafTables, tables, chartElements, fittableColumns, hideAgentSummaries,
         );
     // Avoid duplicating tables that are already leaves (e.g. anchored mids).
     const existingLeafIds = new Set(leafTables.map(t => t.id));

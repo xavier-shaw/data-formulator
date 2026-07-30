@@ -801,7 +801,15 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
                 timestamp: Date.now() });
         } else {
-            const initialEntries: InteractionEntry[] = [
+            // Button-delegated analyst runs record NO user prompt entry: the
+            // click hands the whole exploration to the agent, so every chart in
+            // the run — including the first — must read as agent-initiated
+            // (promptOfTable attributes a step to the user whenever a
+            // `from: 'user'` prompt entry exists in its trigger interaction).
+            // The delegation template still reaches the backend as
+            // user_question; it just never becomes a timeline bubble.
+            const isButtonDelegation = analysisModeOverride === 'analyst';
+            const initialEntries: InteractionEntry[] = isButtonDelegation ? [] : [
                 { from: 'user', to: 'data-agent', role: 'prompt', content: agentPrompt,
                     ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
                     timestamp: Date.now() }
