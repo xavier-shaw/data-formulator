@@ -430,6 +430,22 @@ SPX,65,SPX,US,O/LA/LV/PL/S,B,2007 Aug,-,SpaceX,SpaceX,"Hawthorne, California",-,
             {'format': 'csv', 'path': 'example_datasets/faa_damage.csv'},
         ]
     },
+    {
+        'source': 'df-study',
+        'name': 'Health Spending (Clean)',
+        'description': 'Global health spending estimates for 216 locations (countries, GBD super regions, World Bank income groups, and global) from 1995-2022 — total (THE), government (GHES), prepaid private (PPP), out-of-pocket (OOP), and development-assistance (DAH) expenditure, each given in absolute, per-capita, share-of-total, and share-of-GDP terms. Point estimates only; the uncertainty bounds of the full dataset are dropped.',
+        'tables': [
+            {'format': 'csv', 'path': 'example_datasets/health_spending_clean.csv'},
+        ]
+    },
+    {
+        'source': 'df-study',
+        'name': 'FAA Wildlife Strikes (Clean)',
+        'description': 'FAA reports of wildlife strikes on aircraft (mostly birds) from 1990-2026, with incident date and time of day, airport and coordinates, state, operator, aircraft type/class/mass, engine type and count, flight phase, height, speed, distance, sky and precipitation conditions, damage severity (Minor / Substantial / Destroyed / Undetermined), and the species, size, and number of animals struck.',
+        'tables': [
+            {'format': 'csv', 'path': 'example_datasets/faa_damage_clean.csv'},
+        ]
+    },
 ]
 
 
