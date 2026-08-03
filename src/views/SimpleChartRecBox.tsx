@@ -47,42 +47,16 @@ import { Theme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import { shouldAutoFocusGeneratedChart } from '../app/agentInteractionPolicy';
 import { ClarificationPanel, DelegatePanel, ExplanationPanel } from './AgentPausePanel';
-import { CARD_WIDTH } from './threadLayout';
 
-// Approx footprint of the leading lightning-bolt IconButton (size small,
-// p:0.5 + 16px icon). Used to cap a starter chip so a single chip fits
-// within one thread-column width alongside the toggle icon.
-const STARTER_ICON_WIDTH = 28;
+// Bust the per-table starter-suggestion cache when the generation recipe
+// changes (count, phrasing style, prompt) — folded into the signature so
+// stale entries regenerate on next focus.
+const STARTER_RECIPE_VERSION = 'v2';
 
 // Seed prompt used when the user invokes "report" mode (or a report hand-off)
 // without typing an explicit instruction. The unified analyst loads its
 // `report` skill and emits `write_report` within a normal explore run.
 const REPORT_SEED_PROMPT = 'Write a report summarizing the exploration.';
-
-// A starter-question chip that only shows a tooltip when its label is
-// truncated (i.e. the text is too long to fit within the capped width).
-const StarterChip: FC<{ label: string; onClick: () => void; sx: any }> = ({ label, onClick, sx }) => {
-    const labelRef = useRef<HTMLSpanElement | null>(null);
-    const [isClipped, setIsClipped] = useState(false);
-    const checkClipped = () => {
-        // The MUI `.MuiChip-label` element (parent of our span) is the one that
-        // applies overflow:hidden + ellipsis, so measure that container.
-        const el = labelRef.current?.parentElement;
-        if (el) setIsClipped(el.scrollWidth > el.clientWidth);
-    };
-    return (
-        <Tooltip title={isClipped ? label : ''} placement="top" enterDelay={400}>
-            <Chip
-                size="small"
-                clickable
-                label={<span ref={labelRef}>{label}</span>}
-                onClick={onClick}
-                onMouseEnter={checkClipped}
-                sx={sx}
-            />
-        </Tooltip>
-    );
-};
 
 const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme; onCancel?: () => void; color?: 'primary' | 'warning' }> = ({ message, elapsed, theme, onCancel, color = 'primary' }) => {
     const { t } = useTranslation();
@@ -324,6 +298,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         () => rootTables.map(t => t.id).sort().join('|'),
         [rootTables]
     );
+    // Freshness key for cached starter suggestions: table set + recipe
+    // version, so a recipe change regenerates without touching the id list
+    // (the thunk still derives tableIds from rootTableSignature).
+    const starterSignature = `${rootTableSignature}#${STARTER_RECIPE_VERSION}`;
     const focusedRootTableId = (focusedTableId && rootTables.some(t => t.id === focusedTableId))
         ? focusedTableId
         : undefined;
@@ -334,17 +312,17 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         // LLM call per table load.
         if ((config.studyCondition ?? 'default') === 'executor') return;
         const entry = starterQuestions[focusedRootTableId];
-        if (entry && entry.signature === rootTableSignature) return;        // already fresh
+        if (entry && entry.signature === starterSignature) return;          // already fresh
         if (starterQuestionsStatus[focusedRootTableId] === 'loading') return; // in flight
         const timer = setTimeout(() => {
             dispatch(generateStarterQuestions({
                 tableId: focusedRootTableId,
-                signature: rootTableSignature,
+                signature: starterSignature,
                 tableIds: rootTableSignature.split('|'),
             }));
         }, 500);
         return () => clearTimeout(timer);
-    }, [focusedRootTableId, rootTableSignature, starterQuestions, starterQuestionsStatus, config.studyCondition, dispatch]);
+    }, [focusedRootTableId, rootTableSignature, starterSignature, starterQuestions, starterQuestionsStatus, config.studyCondition, dispatch]);
 
 
     // Helper: confirm selection of a mention (table only)
@@ -609,7 +587,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         actionId: string;
         lastCreatedTableId: string | null;
         analysisMode?: 'executor' | 'analyst_guided';
-    }, displayPrompt?: string, promptOrigin?: 'suggestion') => {
+    }, displayPrompt?: string, promptOrigin?: 'suggestion', suggestionOptions?: string[]) => {
         if (!focusedTableId || (!clarificationContext && prompt.trim() === "")) return;
 
         // Resolve the study behavioral profile. A resume re-enters the paused
@@ -794,6 +772,23 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 timestamp: Date.now() });
         } else {
             const initialEntries: InteractionEntry[] = [
+                // A clicked starter suggestion is agent-authored, so seed the
+                // interaction with a synthesized agent 'clarify' entry ahead of
+                // the pick. The thread's resolved-Q&A folding then renders the
+                // pair as the same compact conversation card an Analyst
+                // closing-suggestion click gets — an agent proposal the user
+                // ratified, not a user-typed message.
+                ...(promptOrigin === 'suggestion' ? [{
+                    from: 'data-agent', to: 'user', role: 'clarify',
+                    content: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested starting points:' }),
+                    clarificationQuestions: [{
+                        text: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested starting points:' }),
+                        responseType: 'single_choice',
+                        options: (suggestionOptions && suggestionOptions.length > 0 ? suggestionOptions : [prompt])
+                            .map(label => ({ label })),
+                    }],
+                    timestamp: Date.now(),
+                } as InteractionEntry] : []),
                 { from: 'user', to: 'data-agent', role: 'prompt', content: agentPrompt,
                     ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
                     // Study telemetry: 'suggestion' marks a prompt whose text was
@@ -1554,7 +1549,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     }, [agentHandoffRequest]);
 
     // ── Unified submit handler ───────────────────────────────────────
-    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, promptOrigin?: 'suggestion') => {
+    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, promptOrigin?: 'suggestion', suggestionOptions?: string[]) => {
         if (clarificationCtx) {
             // Build the structured response payload. The backend assembles
             // the final LLM-facing text ("Selected answers: 1. xxx; 2. yyy\n
@@ -1581,7 +1576,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             exploreFromChat(displayPrompt, clarificationCtx, undefined, allOptions ? 'suggestion' : undefined);
             return;
         }
-        exploreFromChat(prompt, undefined, displayPrompt, promptOrigin);
+        exploreFromChat(prompt, undefined, displayPrompt, promptOrigin, suggestionOptions);
     }, [exploreFromChat, clarificationQuestions, clarifyAnswers]);
 
     // Replay a workflow: the KnowledgePanel fires `df-replay-workflow`
@@ -2116,7 +2111,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     // a chip runs it; clicking the lightning bolt collapses/expands the row.
     const focusedStarterEntry = focusedRootTableId ? starterQuestions[focusedRootTableId] : undefined;
     const focusedStarterStatus = focusedRootTableId ? starterQuestionsStatus[focusedRootTableId] : undefined;
-    const focusedStarterFresh = !!focusedStarterEntry && focusedStarterEntry.signature === rootTableSignature;
+    const focusedStarterFresh = !!focusedStarterEntry && focusedStarterEntry.signature === starterSignature;
     const starterLoading = !!focusedRootTableId && (!focusedStarterFresh || focusedStarterStatus === 'loading');
 
     // Starter chips are agent-authored analytical prompts. They fit Default
@@ -2129,31 +2124,11 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         && !pendingClarification
         && (starterLoading || (focusedStarterEntry?.questions?.length ?? 0) > 0);
 
-    const starterChipSx = {
-        height: 24, borderRadius: '6px', fontSize: 11,
-        color: 'text.secondary',
-        backgroundColor: 'transparent',
-        border: `1px solid ${borderColor.divider}`,
-        // Cap a single chip to one column width minus the toggle icon, and
-        // allow it to shrink (flex) when the row would otherwise overflow.
-        maxWidth: CARD_WIDTH - STARTER_ICON_WIDTH,
-        minWidth: 0,
-        flexShrink: 1,
-        '& .MuiChip-label': {
-            px: '8px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-        },
-        '&:hover': {
-            backgroundColor: alpha(theme.palette.text.primary, 0.04),
-            color: 'text.primary',
-            borderColor: alpha(theme.palette.text.primary, 0.24),
-        },
-    } as const;
-
+    // Vertical stack of starter suggestions, styled after the clarification
+    // panel's option buttons so they read as the same kind of affordance the
+    // Analyst closing suggestions use.
     const gettingStartedBlock = showGettingStarted ? (
-        <Box sx={{ mx: 1, mb: 0.75, px: 0.5, display: 'flex', alignItems: 'center', gap: 0.25, overflow: 'hidden' }}>
+        <Box sx={{ mx: 1, mb: 0.75, px: 0.5, display: 'flex', alignItems: 'flex-start', gap: 0.25, overflow: 'hidden' }}>
             <Tooltip title={t(starterCollapsed ? 'chartRec.expandStarters' : 'chartRec.collapseStarters', { defaultValue: starterCollapsed ? 'Show suggestions' : 'Hide suggestions' })}>
                 <IconButton
                     size="small"
@@ -2171,32 +2146,51 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             {starterCollapsed && (
                 <Typography
                     onClick={() => setStarterCollapsed(false)}
-                    sx={{ fontSize: 11, color: 'text.disabled', cursor: 'pointer', '&:hover': { color: 'text.secondary' } }}
+                    sx={{ fontSize: 11, color: 'text.disabled', cursor: 'pointer', mt: '5px', '&:hover': { color: 'text.secondary' } }}
                 >
                     {t('chartRec.expandStarters', { defaultValue: 'Show suggestions' })}
                 </Typography>
             )}
             <Collapse
-                orientation="horizontal"
                 in={!starterCollapsed}
                 timeout={200}
                 sx={{
                     minWidth: 0,
-                    flexShrink: 1,
-                    '& .MuiCollapse-wrapperInner': { display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'nowrap', minWidth: 0 },
+                    flex: 1,
+                    '& .MuiCollapse-wrapperInner': { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '4px', minWidth: 0 },
                 }}
             >
                 {starterLoading
-                    ? <CircularProgress size={13} thickness={5} sx={{ color: 'text.disabled', mx: 0.5 }} />
+                    ? <CircularProgress size={13} thickness={5} sx={{ color: 'text.disabled', m: 0.5 }} />
                     : (focusedStarterEntry?.questions ?? []).map((q, i) => (
-                        <StarterChip
+                        <Typography
                             key={i}
-                            label={q}
-                            // Starter questions are agent-authored — tag the click so
-                            // telemetry can tell it apart from a typed prompt.
-                            onClick={() => submitChat(q, undefined, undefined, 'suggestion')}
-                            sx={starterChipSx}
-                        />
+                            component="button"
+                            type="button"
+                            // Starter suggestions are agent-authored — pass the full
+                            // set so the run's interaction opens with the agent's
+                            // proposal (rendered like a resolved suggestion exchange),
+                            // and tag the click for telemetry.
+                            onClick={() => submitChat(q, undefined, undefined, 'suggestion', focusedStarterEntry?.questions)}
+                            sx={{
+                                px: '8px', py: '4px',
+                                borderRadius: '6px',
+                                border: `1px solid ${alpha(theme.palette.text.primary, 0.12)}`,
+                                backgroundColor: theme.palette.background.paper,
+                                cursor: 'pointer',
+                                fontSize: 11,
+                                display: 'block',
+                                whiteSpace: 'normal',
+                                wordBreak: 'break-word',
+                                lineHeight: 1.4,
+                                color: theme.palette.text.primary,
+                                textAlign: 'left',
+                                fontFamily: theme.typography.fontFamily,
+                                '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.08), borderColor: alpha(theme.palette.primary.main, 0.4) },
+                            }}
+                        >
+                            {q}
+                        </Typography>
                     ))
                 }
             </Collapse>

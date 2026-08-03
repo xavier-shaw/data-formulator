@@ -573,6 +573,7 @@
     "regenerateIdeas": "Regenerate ideas",
     "interruptedByRefresh": "Interrupted by page refresh",
     "generatingIdeas": "Generating exploration ideas...",
+    "starterSuggestionsIntro": "Suggested starting points:",
     "progressBuildingContext": "Preparing data context...",
     "progressGenerating": "AI is generating suggestions...",
     "conversationEnded": "Conversation ended by user.",

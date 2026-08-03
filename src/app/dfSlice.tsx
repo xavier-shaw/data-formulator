@@ -642,13 +642,13 @@ export const generateStarterQuestions = createAsyncThunk(
                     input_tables: inputTables,
                     primary_table: arg.tableId,
                     model: dfSelectors.getActiveModel(state),
-                    n: 2,
+                    n: 3,
                 }),
             });
             const questions: string[] = Array.isArray(data?.result)
                 ? data.result.map((q: any) => String(q)).filter((q: string) => q.trim() !== '')
                 : [];
-            dispatch(dfActions.setStarterQuestions({ tableId: arg.tableId, signature: arg.signature, questions: questions.slice(0, 2) }));
+            dispatch(dfActions.setStarterQuestions({ tableId: arg.tableId, signature: arg.signature, questions: questions.slice(0, 3) }));
         } catch (err) {
             console.warn('generateStarterQuestions failed', err);
             dispatch(dfActions.setStarterQuestionsError({ tableId: arg.tableId, signature: arg.signature }));
