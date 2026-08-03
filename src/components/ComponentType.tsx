@@ -76,6 +76,11 @@ export interface InteractionEntry {
      *  is shown on its own button and used as the seed prompt sent to
      *  the target agent on click. */
     delegateOptions?: string[];
+    /** For user 'prompt' entries: 'suggestion' marks a reply whose text was
+     *  agent-authored — the user clicked a proposed option (an Analyst closing
+     *  suggestion or a ⚡ starter chip) rather than typing it. Absent = typed
+     *  by the user. Study telemetry (promptSource / quiz signals). */
+    origin?: 'suggestion';
     timestamp?: number;
 }
 
@@ -86,9 +91,9 @@ export interface PendingClarification {
     completedStepCount: number;
     lastCreatedTableId: string | null;
     // Study behavioral profile of the paused run, so resuming re-enters the
-    // same mode (a button-delegated 'analyst' run must not resume as typed-chat
-    // 'analyst_guided', and vice versa). Absent on runs from older sessions.
-    analysisMode?: 'executor' | 'analyst' | 'analyst_guided';
+    // same mode (an 'executor' run must not resume as 'analyst_guided', and
+    // vice versa). Absent on runs from older sessions.
+    analysisMode?: 'executor' | 'analyst_guided';
 }
 
 export interface DraftNode {

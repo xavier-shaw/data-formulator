@@ -36,7 +36,6 @@ import { alpha } from '@mui/material/styles';
 import { WritingPencil } from '../components/FunComponents';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import AddIcon from '@mui/icons-material/Add';
-import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import BoltIcon from '@mui/icons-material/Bolt';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
@@ -84,19 +83,6 @@ const StarterChip: FC<{ label: string; onClick: () => void; sx: any }> = ({ labe
         </Tooltip>
     );
 };
-
-// User-study "Analyst" power button: clicking it ignores whatever the participant
-// typed and hands the analysis to the agent. DELEGATION_TEMPLATE_PROMPT is the
-// message the agent actually receives (plain user voice); it now carries the full
-// analytical steering itself — the server side only raises the action budget. The
-// display label is the clean bubble shown in the timeline.
-const DELEGATION_TEMPLATE_PROMPT =
-`Act as an analyst and take over the analysis. Work across multiple steps toward a single genuine insight I can follow and understand.
-
-Before you drill in, step back and read the big picture: what's already been explored in the overall data analysis as well as this thread so far. From there, decide your direction — either continue deepening the thread that's already open, or start a new one if the current line is exhausted or a more promising angle stands out.
-
-Then commit to depth, not breadth. Spend your budget building one coherent thread rather than spreading it across many disconnected angles. Start by understanding the fields that thread depends on, then move into the patterns and relationships they reveal. Each visualization should follow from the last: read what it shows, form a hypothesis, and let the next chart test it, so the whole sequence reads as one line of reasoning a person can follow.`;
-const DELEGATION_DISPLAY_LABEL = '🤝 Take over the analysis';
 
 const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme; onCancel?: () => void; color?: 'primary' | 'warning' }> = ({ message, elapsed, theme, onCancel, color = 'primary' }) => {
     const { t } = useTranslation();
@@ -343,6 +329,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         : undefined;
     React.useEffect(() => {
         if (!focusedRootTableId) return;
+        // The Executor condition never renders starter chips (see
+        // showGettingStarted), so skip generation entirely there — no stray
+        // LLM call per table load.
+        if ((config.studyCondition ?? 'default') === 'executor') return;
         const entry = starterQuestions[focusedRootTableId];
         if (entry && entry.signature === rootTableSignature) return;        // already fresh
         if (starterQuestionsStatus[focusedRootTableId] === 'loading') return; // in flight
@@ -354,7 +344,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             }));
         }, 500);
         return () => clearTimeout(timer);
-    }, [focusedRootTableId, rootTableSignature, starterQuestions, starterQuestionsStatus, dispatch]);
+    }, [focusedRootTableId, rootTableSignature, starterQuestions, starterQuestionsStatus, config.studyCondition, dispatch]);
 
 
     // Helper: confirm selection of a mention (table only)
@@ -618,20 +608,19 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         completedStepCount: number;
         actionId: string;
         lastCreatedTableId: string | null;
-        analysisMode?: 'executor' | 'analyst' | 'analyst_guided';
-    }, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst' | 'analyst_guided') => {
+        analysisMode?: 'executor' | 'analyst_guided';
+    }, displayPrompt?: string, promptOrigin?: 'suggestion') => {
         if (!focusedTableId || (!clarificationContext && prompt.trim() === "")) return;
 
-        // Resolve the study behavioral profile. The power button passes an explicit
-        // 'analyst' override (full delegation). A resume re-enters the paused run's
-        // mode. Otherwise the condition decides typed chat: 'executor' constrains
-        // it to executor mode; 'analyst' sends 'analyst_guided' (anchor on the
-        // instruction, then always extend the exploration beyond it); 'default'
-        // sends no analysis_mode, so typed chat uses the normal agent (the
-        // "choosing what to do" taxonomy).
-        const analysisMode: 'executor' | 'analyst' | 'analyst_guided' | undefined =
-            analysisModeOverride
-            ?? clarificationContext?.analysisMode
+        // Resolve the study behavioral profile. A resume re-enters the paused
+        // run's mode. Otherwise the condition decides typed chat: 'executor'
+        // constrains it to executor mode; 'analyst' sends 'analyst_guided'
+        // (anchor on the instruction, extend along it, close every charting
+        // run with next-step suggestions); 'default' sends no analysis_mode,
+        // so typed chat uses the normal agent (the "choosing what to do"
+        // taxonomy).
+        const analysisMode: 'executor' | 'analyst_guided' | undefined =
+            clarificationContext?.analysisMode
             ?? (config.studyCondition === 'executor' ? 'executor'
                 : config.studyCondition === 'analyst' ? 'analyst_guided'
                 : undefined);
@@ -677,6 +666,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             dispatch(dfActions.appendDraftInteraction({ draftId: pendingClarification.draftId, entry: {
                 from: 'user', to: 'data-agent', role: 'prompt', content: agentPrompt,
                 ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
+                // Study telemetry: 'suggestion' marks a reply whose text was
+                // agent-authored (the user clicked a proposed option) rather
+                // than typed — the quiz's promptSource signal reads this.
+                ...(promptOrigin ? { origin: promptOrigin } : {}),
                 timestamp: Date.now()
             }}));
             dispatch(dfActions.updateDraftClarification({ draftId: pendingClarification.draftId, pendingClarification: null }));
@@ -704,10 +697,9 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             max_iterations: 10,
             agent_mode: config.miniMode ? 'mini' : 'standard',
             // User-study behavioral profile. Omitted in the 'default' condition so
-            // the backend runs its existing path; otherwise 'executor' (typed, in
-            // the executor condition), 'analyst_guided' (typed, in the analyst
-            // condition), or 'analyst' (power button). The backend maps this to
-            // the action budget + exploration rules (source of truth).
+            // the backend runs its existing path; otherwise 'executor' (executor
+            // condition) or 'analyst_guided' (analyst condition). The backend maps
+            // this to the action budget + exploration rules (source of truth).
             ...(analysisMode ? { analysis_mode: analysisMode } : {}),
         };
 
@@ -801,17 +793,12 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
                 timestamp: Date.now() });
         } else {
-            // Button-delegated analyst runs record NO user prompt entry: the
-            // click hands the whole exploration to the agent, so every chart in
-            // the run — including the first — must read as agent-initiated
-            // (promptOfTable attributes a step to the user whenever a
-            // `from: 'user'` prompt entry exists in its trigger interaction).
-            // The delegation template still reaches the backend as
-            // user_question; it just never becomes a timeline bubble.
-            const isButtonDelegation = analysisModeOverride === 'analyst';
-            const initialEntries: InteractionEntry[] = isButtonDelegation ? [] : [
+            const initialEntries: InteractionEntry[] = [
                 { from: 'user', to: 'data-agent', role: 'prompt', content: agentPrompt,
                     ...(cleanDisplay ? { displayContent: cleanDisplay } : {}),
+                    // Study telemetry: 'suggestion' marks a prompt whose text was
+                    // agent-authored (a clicked ⚡ starter chip) rather than typed.
+                    ...(promptOrigin ? { origin: promptOrigin } : {}),
                     timestamp: Date.now() }
             ];
             createNextDraft(lastCreatedTableId || focusedTableId!, initialEntries);
@@ -1050,15 +1037,15 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 }
                 const displayInstruction = lastAgentDisplayInstruction || refinedGoal?.display_instruction || t('chartRec.explorationStep', { step: createdTables.length + 1, question });
 
-                // Thread placement — enabled for the whole ANALYST condition (typed
-                // default-mode runs AND the delegated power button), not just analyst
-                // mode. The agent may set branch_from to the NAME of any existing node
-                // to hang this chart under — a source table (new thread) or an earlier
-                // step's output (deepen that line). This is the ONLY thing that
-                // determines thread structure, and it is orthogonal to derive.source
-                // (what the code read). Search all tables incl. ones created earlier
-                // THIS run (createdTables, read live); unresolved → linear fallback.
-                // Executor/Default conditions never honor it → their threads are unchanged.
+                // Thread placement — honored only in the ANALYST condition (typed
+                // analyst_guided runs). The agent may set branch_from to the NAME
+                // of any existing node to hang this chart under — a source table
+                // (new thread) or an earlier step's output (deepen that line).
+                // This is the ONLY thing that determines thread structure, and it
+                // is orthogonal to derive.source (what the code read). Search all
+                // tables incl. ones created earlier THIS run (createdTables, read
+                // live); unresolved → linear fallback. Executor/Default conditions
+                // never honor it → their threads are unchanged.
                 let resolvedBranchFrom: string | undefined = undefined;
                 if ((config.studyCondition ?? 'default') === 'analyst' && lastAgentBranchFrom) {
                     const wanted = lastAgentBranchFrom.replace(/\.[^/.]+$/, "");
@@ -1567,7 +1554,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     }, [agentHandoffRequest]);
 
     // ── Unified submit handler ───────────────────────────────────────
-    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, analysisModeOverride?: 'executor' | 'analyst' | 'analyst_guided') => {
+    const submitChat = useCallback((prompt: string, clarificationCtx?: any, displayPrompt?: string, promptOrigin?: 'suggestion') => {
         if (clarificationCtx) {
             // Build the structured response payload. The backend assembles
             // the final LLM-facing text ("Selected answers: 1. xxx; 2. yyy\n
@@ -1588,10 +1575,13 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             // as `prompt` — it powers both the timeline bubble and the
             // user message appended to the trajectory on the backend.
             const displayPrompt = formatClarificationResponses(responses);
-            exploreFromChat(displayPrompt, clarificationCtx, undefined, analysisModeOverride);
+            // Origin telemetry: a reply built purely from clicked options is
+            // agent-authored text (a picked suggestion), not a typed prompt.
+            const allOptions = responses.length > 0 && responses.every(r => r.source === 'option');
+            exploreFromChat(displayPrompt, clarificationCtx, undefined, allOptions ? 'suggestion' : undefined);
             return;
         }
-        exploreFromChat(prompt, undefined, displayPrompt, analysisModeOverride);
+        exploreFromChat(prompt, undefined, displayPrompt, promptOrigin);
     }, [exploreFromChat, clarificationQuestions, clarifyAnswers]);
 
     // Replay a workflow: the KnowledgePanel fires `df-replay-workflow`
@@ -1632,7 +1622,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         // Pass the formatted display string as `prompt` — it powers both the
         // timeline bubble and the user message appended to the trajectory.
         const displayPrompt = formatClarificationResponses(responses);
-        exploreFromChat(displayPrompt, pendingClarification);
+        // Origin telemetry: a reply built purely from clicked options is
+        // agent-authored text (a picked suggestion), not a typed prompt.
+        const allOptions = responses.length > 0 && responses.every(r => r.source === 'option');
+        exploreFromChat(displayPrompt, pendingClarification, undefined, allOptions ? 'suggestion' : undefined);
     }, [exploreFromChat, pendingClarification]);
 
     // Reset accumulated clarification answers whenever the active
@@ -1970,8 +1963,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                     {/* The attach / report / get-ideas buttons belong to the
                         unmodified Default condition. Both study conditions
                         (Executor, Analyst) hide them to keep the participant's
-                        surface minimal — only typed instructions (+ the Analyst
-                        power button) drive the agent. */}
+                        surface minimal — typed instructions (and, in Analyst,
+                        the agent's closing suggestions) drive the agent. */}
                     {(config.studyCondition ?? 'default') === 'default' && (
                         <Tooltip title={t('chartRec.attachContext', { defaultValue: 'Attach context (image or file)' })}>
                             <IconButton
@@ -2026,50 +2019,9 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                 </span>
                             </Tooltip>
                         )}
-                        {/* User-study Analyst condition: hand the analysis to the
-                            agent for autonomous multi-step exploration. Ignores
-                            typed input — sends a fixed delegation prompt. Hidden in
-                            Default and Executor. */}
-                        {(config.studyCondition ?? 'default') === 'analyst' && (
-                            <Tooltip title={t('chartRec.delegateToAnalyst', { defaultValue: 'Hand the analysis to the agent (explores on its own)' })}>
-                                <span>
-                                    <Button
-                                        size="small"
-                                        variant="outlined"
-                                        startIcon={<LightbulbIcon sx={{ fontSize: 16 }} />}
-                                        aria-label={t('chartRec.exploreForMe')}
-                                        disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
-                                        onClick={() => submitChat(DELEGATION_TEMPLATE_PROMPT, undefined, DELEGATION_DISPLAY_LABEL, 'analyst')}
-                                        sx={{
-                                            textTransform: 'none',
-                                            height: 30,
-                                            px: 1.25,
-                                            borderRadius: '8px',
-                                            fontSize: '0.78rem',
-                                            fontWeight: 400,
-                                            whiteSpace: 'nowrap',
-                                            minWidth: 0,
-                                            color: 'primary.main',
-                                            borderColor: alpha(theme.palette.primary.main, 0.4),
-                                            '& .MuiButton-startIcon': { mr: 0.5, ml: -0.25 },
-                                            '&:hover': {
-                                                borderColor: 'primary.main',
-                                                backgroundColor: alpha(theme.palette.primary.main, 0.06),
-                                            },
-                                            '&.Mui-disabled': {
-                                                borderColor: alpha(theme.palette.text.disabled, 0.3),
-                                                color: 'text.disabled',
-                                            },
-                                        }}
-                                    >
-                                        {t('chartRec.exploreForMe')}
-                                    </Button>
-                                </span>
-                            </Tooltip>
-                        )}
                         {/* In the study conditions the send affordance carries a
-                            "Send" text label (alongside the Analyst "Explore for
-                            me" button); Default keeps the compact icon-only arrow. */}
+                            "Send" text label; Default keeps the compact
+                            icon-only arrow. */}
                         {(config.studyCondition ?? 'default') !== 'default' ? (
                             <Button
                                 size="small"
@@ -2167,7 +2119,12 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     const focusedStarterFresh = !!focusedStarterEntry && focusedStarterEntry.signature === rootTableSignature;
     const starterLoading = !!focusedRootTableId && (!focusedStarterFresh || focusedStarterStatus === 'loading');
 
-    const showGettingStarted = !!focusedRootTableId
+    // Starter chips are agent-authored analytical prompts. They fit Default
+    // and the agent-driven Analyst condition (the agent proposing directions
+    // is that condition's point), but Executor hides them — there the user
+    // makes every analytical decision, so agent ideation must not leak in.
+    const showGettingStarted = (config.studyCondition ?? 'default') !== 'executor'
+        && !!focusedRootTableId
         && !isChatFormulating
         && !pendingClarification
         && (starterLoading || (focusedStarterEntry?.questions?.length ?? 0) > 0);
@@ -2235,7 +2192,9 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         <StarterChip
                             key={i}
                             label={q}
-                            onClick={() => submitChat(q)}
+                            // Starter questions are agent-authored — tag the click so
+                            // telemetry can tell it apart from a typed prompt.
+                            onClick={() => submitChat(q, undefined, undefined, 'suggestion')}
                             sx={starterChipSx}
                         />
                     ))

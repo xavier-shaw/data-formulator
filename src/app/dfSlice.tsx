@@ -133,7 +133,7 @@ export interface ClientConfig {
     frontendRowLimit: number; // max rows to keep in browser when loading locally (non-virtual)
     paletteKey: string; // active color palette key from tokens.ts
     miniMode: boolean; // when true, run the single-turn MiniAnalystAgent (for small/local models)
-    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained; 'analyst' = constrained + power button (delegated exploration)
+    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained (user makes every analytical decision); 'analyst' = agent-driven (extends each instruction, closes every run with next-step suggestions)
 }
 
 export interface GeneratedReport {
