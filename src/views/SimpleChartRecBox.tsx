@@ -217,8 +217,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         requestAnimationFrame(() => chatInputRef.current?.focus());
     }, []);
 
-    const generatedReports = useSelector((state: DataFormulatorState) => state.generatedReports);
-
+    // Reports open in the side panel without taking canvas focus, so the
+    // chat context always follows the focused chart/table.
     const focusedTableId = useCallback(() => {
         if (!focusedId) return undefined;
         if (focusedId.type === 'table') return focusedId.tableId;
@@ -226,12 +226,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             const chart = charts.find(c => c.id === focusedId.chartId);
             return chart?.tableRef;
         }
-        if (focusedId.type === 'report') {
-            const report = generatedReports.find(r => r.id === focusedId.reportId);
-            return report?.triggerTableId;
-        }
         return undefined;
-    }, [focusedId, charts, generatedReports])();
+    }, [focusedId, charts])();
 
     // Root tables and priority ordering for API calls
     const rootTables = tables.filter(t => t.derive === undefined || t.anchored);

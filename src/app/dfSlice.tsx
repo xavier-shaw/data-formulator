@@ -122,6 +122,15 @@ export interface ChartUsageEntry {
     lastViewedAt?: number;
 }
 
+/**
+ * Study telemetry: one entry per successful "add chart to report" click, in
+ * order. Persisted with the workspace alongside `chartUsage`.
+ */
+export interface ReportChartAddEntry {
+    chartId: string;
+    at: number;
+}
+
 export const DEFAULT_ROW_LIMIT = 2_000_000;
 export const DEFAULT_ROW_LIMIT_EPHEMERAL = 20_000;
 
@@ -168,6 +177,36 @@ export interface GeneratedReport {
     }[];
 }
 
+/**
+ * The participant-authored "findings" report used in the study conditions
+ * (Executor / Analyst). One per session, lazily created by the "open report"
+ * toggle or the first per-chart "add to report" click. The fixed id can never
+ * collide with agent-generated reports (`report-<epoch>`), and having no
+ * `triggerTableId` keeps it out of the thread timeline.
+ */
+export const FINDINGS_REPORT_ID = 'report-findings';
+
+/**
+ * Whether the report's CONTENT embeds the chart. Checked against content (not
+ * `selectedChartIds`) so re-adding works after the user deletes a section.
+ * Chart ids look like `chart-<epoch>-<n>`, so only the delimited forms are
+ * unambiguous: `chart://<id>)` (markdown) and `data-chart-id="<id>"` (HTML).
+ */
+export const reportContainsChart = (report: GeneratedReport | undefined, chartId: string): boolean =>
+    !!report && (
+        report.content.includes(`chart://${chartId})`)
+        || report.content.includes(`data-chart-id="${chartId}"`)
+    );
+
+export const buildFindingsReportSeed = (title: string): GeneratedReport => ({
+    id: FINDINGS_REPORT_ID,
+    content: `# ${title}\n`,
+    selectedChartIds: [],
+    createdAt: Date.now(),
+    title,
+    status: 'completed',
+});
+
 export interface DataFormulatorState {
 
 
@@ -199,8 +238,18 @@ export interface DataFormulatorState {
 
     focusedId: FocusedId;
 
+    /**
+     * Report shown in the side panel while `viewMode === 'report'`. Reports
+     * open next to the chart canvas (three-column layout), so canvas focus
+     * (`focusedId`) is preserved independently of the open report.
+     */
+    focusedReportId: string | undefined;
+
     /** Passive per-chart viewing telemetry (see ChartUsageEntry). */
     chartUsage: Record<string, ChartUsageEntry>;
+
+    /** Study telemetry: ordered "add chart to report" events (see ReportChartAddEntry). */
+    reportChartAdds: ReportChartAddEntry[];
 
     viewMode: 'editor' | 'report';
 
@@ -325,7 +374,9 @@ const initialState: DataFormulatorState = {
 
     focusedDataCleanBlockId: undefined,
     focusedId: undefined,
+    focusedReportId: undefined,
     chartUsage: {},
+    reportChartAdds: [],
 
     viewMode: 'editor',
 
@@ -347,7 +398,7 @@ const initialState: DataFormulatorState = {
     config: {
         formulateTimeoutSeconds: 180,
         defaultChartWidth: 400,
-        defaultChartHeight: 300,
+        defaultChartHeight: 400,
         maxStretchFactor: 2.0,
         frontendRowLimit: DEFAULT_ROW_LIMIT,
         paletteKey: 'fluent',
@@ -571,14 +622,11 @@ let removeTableStateRoutine = (state: DataFormulatorState, tableId: string) => {
     if (state.focusedId?.type === 'table' && state.focusedId.tableId === tableId) {
         state.focusedId = state.tables.length > 0 ? { type: 'table', tableId: state.tables[0].id } : undefined;
     }
-    // If a report triggered by this table was focused, fall back
-    if (state.focusedId?.type === 'report') {
-        const reportId = (state.focusedId as { type: 'report'; reportId: string }).reportId;
-        const focusedReport = state.generatedReports.find(r => r.id === reportId);
-        if (!focusedReport) {
-            state.focusedId = state.tables.length > 0 ? { type: 'table', tableId: state.tables[state.tables.length - 1].id } : undefined;
-            state.viewMode = 'editor';
-        }
+    // If the report open in the side panel was triggered by this table
+    // (and thus deleted above), close the panel.
+    if (state.focusedReportId && !state.generatedReports.some(r => r.id === state.focusedReportId)) {
+        state.focusedReportId = undefined;
+        state.viewMode = 'editor';
     }
 };
 
@@ -763,7 +811,9 @@ export const dataFormulatorSlice = createSlice({
             state.focusedDataCleanBlockId = undefined;
 
             state.focusedId = undefined;
+            state.focusedReportId = undefined;
             state.chartUsage = {};
+            state.reportChartAdds = [];
 
             state.viewMode = 'editor';
 
@@ -794,7 +844,9 @@ export const dataFormulatorSlice = createSlice({
             state.activeWorkspace = action.payload;
         },
         resetForNewWorkspace: (state, action: PayloadAction<{ id: string; displayName: string }>) => {
-            // Fresh session data, but preserve user settings / server config / identity / view mode
+            // Fresh session data, but preserve user settings / server config / identity.
+            // viewMode intentionally resets to 'editor' — a new workspace has
+            // no reports, so an open report panel would be empty.
             return {
                 ...initialState,
                 identity: state.identity,
@@ -804,7 +856,6 @@ export const dataFormulatorSlice = createSlice({
                 testedModels: state.testedModels,
                 serverConfig: state.serverConfig,
                 config: state.config,
-                viewMode: state.viewMode,
                 dataLoaderConnectParams: state.dataLoaderConnectParams,
                 dataSourceSidebarOpen: state.dataSourceSidebarOpen,
                 dataSourceSidebarTab: state.dataSourceSidebarTab,
@@ -916,18 +967,32 @@ export const dataFormulatorSlice = createSlice({
                 }),
                 conceptShelfItems: saved.conceptShelfItems || [],
                 focusedDataCleanBlockId: saved.focusedDataCleanBlockId || undefined,
-                focusedId: saved.focusedId || undefined,
+                // Legacy sessions could save a report as the canvas focus
+                // (reports used to replace the chart view). Reports now live
+                // in the side panel, so migrate that into focusedReportId and
+                // let the auto-focus effect pick a canvas target.
+                focusedId: saved.focusedId?.type === 'report' ? undefined : (saved.focusedId || undefined),
+                focusedReportId: saved.focusedReportId
+                    ?? (saved.focusedId?.type === 'report' ? saved.focusedId.reportId : undefined),
                 chartUsage: saved.chartUsage || {},
+                reportChartAdds: saved.reportChartAdds || [],
                 config: { ...initialState.config, ...(saved.config || {}) },
                 dataCleanBlocks: saved.dataCleanBlocks || [],
                 dataLoadingChatMessages: saved.dataLoadingChatMessages || [],
                 dataLoadingChatPending: null,
-                generatedReports: saved.generatedReports || [],
+                // Clear a stale 'writing' phase on non-generating reports: sessions
+                // saved before the updateGeneratedReportContent fix could carry it,
+                // and it blocks the editor's external-content sync.
+                generatedReports: (saved.generatedReports || []).map((r: GeneratedReport) =>
+                    r.status !== 'generating' && r.generatingPhase !== undefined
+                        ? { ...r, generatingPhase: undefined }
+                        : r),
 
                 // Reset transient fields
                 messages: [],
                 displayedMessageIdx: -1,
-                viewMode: saved.viewMode || 'editor',
+                // Only reopen the report panel when there is a report to show.
+                viewMode: (saved.viewMode === 'report' && (saved.generatedReports || []).length > 0) ? 'report' : 'editor',
                 chartSynthesisInProgress: [],
                 cleanInProgress: false,
                 dataLoadingChatInProgress: false,
@@ -1693,14 +1758,17 @@ export const dataFormulatorSlice = createSlice({
         },
         setFocused: (state, action: PayloadAction<FocusedId>) => {
             const payload = action.payload;
-            state.focusedId = payload;
 
-            if (payload?.type === 'chart' && state.viewMode == 'report') {
-                state.viewMode = 'editor';
-            }
+            // Reports open in the side panel next to the chart canvas, so
+            // focusing a report must not disturb the canvas focus — and
+            // focusing a chart must not close an open report panel.
             if (payload?.type === 'report') {
+                state.focusedReportId = payload.reportId;
                 state.viewMode = 'report';
+                return;
             }
+
+            state.focusedId = payload;
             // Clear the "unread" mark on a chart as soon as the user focuses it.
             if (payload?.type === 'chart') {
                 const focusedChart = state.charts.find(c => c.id === payload.chartId);
@@ -1708,6 +1776,10 @@ export const dataFormulatorSlice = createSlice({
                     focusedChart.unread = false;
                 }
             }
+        },
+        closeReportView: (state) => {
+            state.viewMode = 'editor';
+            state.focusedReportId = undefined;
         },
         setFocusedDataCleanBlockId: (state, action: PayloadAction<{blockId: string, itemId: number} | undefined>) => {
             state.focusedDataCleanBlockId = action.payload;
@@ -1869,28 +1941,19 @@ export const dataFormulatorSlice = createSlice({
         },
         deleteGeneratedReport: (state, action: PayloadAction<string>) => {
             const reportId = action.payload;
-            const report = state.generatedReports.find(r => r.id === reportId);
-            const wasFocused = state.focusedId?.type === 'report' && state.focusedId.reportId === reportId;
 
             state.generatedReports = state.generatedReports.filter(r => r.id !== reportId);
 
-            // Fallback focus: trigger table's first chart, or the trigger table itself
-            if (wasFocused && report) {
-                const triggerTableId = report.triggerTableId;
-                if (triggerTableId) {
-                    const allCharts = collectAllCharts(state);
-                    const tableChart = allCharts.find(c => c.tableRef === triggerTableId && c.source === 'user');
-                    if (tableChart) {
-                        state.focusedId = { type: 'chart', chartId: tableChart.id };
-                    } else {
-                        state.focusedId = { type: 'table', tableId: triggerTableId };
-                    }
-                } else if (state.tables.length > 0) {
-                    state.focusedId = { type: 'table', tableId: state.tables[state.tables.length - 1].id };
+            // Canvas focus is untouched — reports live in the side panel.
+            // If the deleted report was the open one, show another report
+            // (if any) or close the panel.
+            if (state.focusedReportId === reportId) {
+                if (state.viewMode === 'report' && state.generatedReports.length > 0) {
+                    state.focusedReportId = state.generatedReports[0].id;
                 } else {
-                    state.focusedId = undefined;
+                    state.focusedReportId = undefined;
+                    state.viewMode = 'editor';
                 }
-                state.viewMode = 'editor';
             }
         },
         updateGeneratedReportContent: (state, action: PayloadAction<{ id: string; content: string; status?: GeneratedReport['status']; title?: string; triggerTableId?: string; summary?: string; summaryThought?: string }>) => {
@@ -1909,13 +1972,66 @@ export const dataFormulatorSlice = createSlice({
                 if (triggerTableId) report.triggerTableId = triggerTableId;
                 // Once real report text starts streaming, switch the indicator to
                 // the "writing" phase. When generation ends, clear transient state.
-                if (content) report.generatingPhase = 'writing';
+                // Only while generating: user edits also flow through here, and a
+                // stuck 'writing' phase blocks the editor's external-content sync
+                // (TiptapReportEditor bails on generatingPhase === 'writing').
+                if (content && report.status === 'generating') report.generatingPhase = 'writing';
                 if (status === 'completed' || status === 'error') {
                     report.generatingPhase = undefined;
                     report.inspectionSteps = undefined;
                 }
                 report.updatedAt = Date.now();
             }
+        },
+        /**
+         * Create the participant findings report if it doesn't exist yet.
+         * Idempotent (unlike saveGeneratedReport, which replaces by id and
+         * could wipe the report's content on a stale-closure double-click).
+         */
+        ensureFindingsReport: (state, action: PayloadAction<{ title: string }>) => {
+            if (!state.generatedReports.some(r => r.id === FINDINGS_REPORT_ID)) {
+                state.generatedReports.unshift(buildFindingsReportSeed(action.payload.title));
+            }
+        },
+        /**
+         * Append a chart section (heading + embed + takeaway placeholder) to a
+         * report — the participant findings report in the study conditions.
+         * Format-aware: content is markdown until the first TipTap edit stores
+         * editor.getHTML(), so append in whichever format the report is in.
+         * Idempotent against CONTENT (not selectedChartIds), so double-clicks
+         * no-op and re-adding works after the user deleted the section.
+         * `heading`/`placeholder` arrive pre-translated (reducers stay i18n-free).
+         */
+        addChartToReport: (state, action: PayloadAction<{ reportId: string; chartId: string; heading: string; placeholder: string }>) => {
+            const { reportId, chartId, heading, placeholder } = action.payload;
+            const report = state.generatedReports.find(r => r.id === reportId);
+            if (!report) return;
+            if (reportContainsChart(report, chartId)) return;
+
+            if (report.content.trimStart().startsWith('<')) {
+                // HTML (post-edit). processReport rewrites any <img data-chart-id>
+                // tag with a fresh blob URL, so an empty src is fine here.
+                const esc = (s: string) => s
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                report.content += `<h2>${esc(heading)}</h2>`
+                    + `<img data-chart-id="${chartId}" alt="${esc(heading)}" style="max-width:100%;" />`
+                    + `<p><em>${esc(placeholder)}</em></p>`;
+            } else {
+                // Markdown (pre-edit). Caption can't contain the md-image delimiters.
+                const line = heading.replace(/\n/g, ' ');
+                const caption = line.replace(/[\[\]()]/g, '');
+                report.content = report.content.replace(/\s*$/, '')
+                    + `\n\n## ${line}\n\n![${caption}](chart://${chartId})\n\n*${placeholder}*\n`;
+            }
+            if (!report.selectedChartIds.includes(chartId)) report.selectedChartIds.push(chartId);
+
+            // Defensive: never leave a stale phase blocking the editor's sync.
+            report.generatingPhase = undefined;
+            report.updatedAt = Date.now();   // drives ReportView's external-refresh effect
+
+            if (!state.reportChartAdds) state.reportChartAdds = [];   // pre-feature persisted states
+            state.reportChartAdds.push({ chartId, at: Date.now() });
         },
         updateGeneratedReportProgress: (state, action: PayloadAction<{ id: string; kind: 'start' | 'end'; label?: string; doneLabel?: string; charts?: { chartType: string; name: string }[] }>) => {
             const { id, kind, label, doneLabel, charts } = action.payload;

@@ -217,6 +217,13 @@
   },
   "report": {
     "deleteReport": "删除报告",
+    "closePanel": "关闭报告面板",
+    "myFindingsTitle": "我的发现",
+    "openFindings": "打开发现报告",
+    "addToFindings": "将图表添加到报告",
+    "alreadyInFindings": "已在报告中——点击打开",
+    "takeawayPlaceholder": "（在这里写下你的发现……）",
+    "chartNumberFallback": "图表 {{number}}",
     "backToEditor": "返回编辑器",
     "editReport": "编辑报告",
     "doneEditing": "完成编辑",

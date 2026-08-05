@@ -45,7 +45,7 @@ import ButtonGroup from '@mui/material/ButtonGroup';
 import '../scss/VisualizationView.scss';
 import '../scss/DataView.scss';
 import { useDispatch, useSelector } from 'react-redux';
-import { DataFormulatorState, dfActions } from '../app/dfSlice';
+import { DataFormulatorState, dfActions, FINDINGS_REPORT_ID } from '../app/dfSlice';
 import { assembleVegaChart, extractFieldsFromEncodingMap, getUrls, prepVisTable, fetchWithIdentity } from '../app/utils';
 import { displayRowsCache } from '../app/displayRowsCache';
 import { buildEmbeddedDataForChart, applyVariantConfigUI } from '../app/restyle';
@@ -56,6 +56,7 @@ import { Chart, EncodingItem, EncodingMap, FieldItem, computeInsightKey } from '
 import TerminalIcon from '@mui/icons-material/Terminal';
 import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
 import TuneIcon from '@mui/icons-material/Tune';
+import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
@@ -532,6 +533,12 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
     const [encodingOpen, setEncodingOpen] = useState<boolean>(false);
     const editButtonRef = useRef<HTMLButtonElement | null>(null);
 
+    // Study conditions: "open report" toggle for the participant findings
+    // report (opens the side panel; participants document takeaways there).
+    const viewMode = useSelector((state: DataFormulatorState) => state.viewMode);
+    const focusedReportId = useSelector((state: DataFormulatorState) => state.focusedReportId);
+    const findingsReportOpen = viewMode === 'report' && focusedReportId === FINDINGS_REPORT_ID;
+
     // State for the compact action dock that sits below the chart-mode data
     // table (mirrors the table-focus dock; replaces the grid's inline footer).
     const [chartTableGridReport, setChartTableGridReport] = useState<{ loadedCount: number; rowCount: number; virtual: boolean; canRandomize: boolean; isRandom: boolean } | null>(null);
@@ -863,13 +870,18 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                                     delete-chart action, so it always renders even when there
                                     are no property controls (e.g. Table/Auto charts or while
                                     synthesis is running — in which case property controls are
-                                    suppressed but delete stays reachable). */}
-                                <ChartQuickConfig
-                                    chartId={focusedChart.id}
-                                    tableMetadata={table.metadata}
-                                    options={(!chartUnavailable && !chartSynthesisInProgress.includes(focusedChart.id) && focusedChart.chartType !== "Table" && focusedChart.chartType !== "Auto") ? renderedSpec?._options : undefined}
-                                    deleteDisabled={trigger != undefined}
-                                />
+                                    suppressed but delete stays reachable).
+                                    Default condition only: both study conditions (Executor,
+                                    Analyst) hide the whole bar — like the style module, chart
+                                    tweaking/deletion is off the participant surface. */}
+                                {(config.studyCondition ?? 'default') === 'default' && (
+                                    <ChartQuickConfig
+                                        chartId={focusedChart.id}
+                                        tableMetadata={table.metadata}
+                                        options={(!chartUnavailable && !chartSynthesisInProgress.includes(focusedChart.id) && focusedChart.chartType !== "Table" && focusedChart.chartType !== "Auto") ? renderedSpec?._options : undefined}
+                                        deleteDisabled={trigger != undefined}
+                                    />
+                                )}
                                 {chartActionItems}
                             </Box>
                         </Fade>;
@@ -1149,6 +1161,33 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                                 } : {}),
                             }}>
                             <TuneIcon sx={{ fontSize: 18 }} />
+                        </IconButton>
+                    </Tooltip>
+                )}
+                {/* Findings-report toggle: study conditions only. Participants
+                    document their takeaways in a self-authored report; this
+                    opens/closes it in the side panel. */}
+                {(config.studyCondition ?? 'default') !== 'default' && (
+                    <Tooltip title={findingsReportOpen ? t('report.closePanel') : t('report.openFindings')} placement="bottom">
+                        <IconButton
+                            size="small"
+                            onClick={() => {
+                                if (findingsReportOpen) {
+                                    dispatch(dfActions.closeReportView());
+                                } else {
+                                    dispatch(dfActions.ensureFindingsReport({ title: t('report.myFindingsTitle') }));
+                                    dispatch(dfActions.setFocused({ type: 'report', reportId: FINDINGS_REPORT_ID }));
+                                }
+                            }}
+                            sx={{
+                                ...floatingPillSx,
+                                ...(findingsReportOpen ? {
+                                    backgroundColor: 'primary.main',
+                                    color: 'primary.contrastText',
+                                    '&:hover': { backgroundColor: 'primary.dark', color: 'primary.contrastText' },
+                                } : {}),
+                            }}>
+                            <ArticleOutlinedIcon sx={{ fontSize: 18 }} />
                         </IconButton>
                     </Tooltip>
                 )}

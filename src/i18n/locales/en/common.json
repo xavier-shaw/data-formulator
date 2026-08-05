@@ -217,6 +217,13 @@
   },
   "report": {
     "deleteReport": "Delete report",
+    "closePanel": "Close report panel",
+    "myFindingsTitle": "My findings",
+    "openFindings": "Open findings report",
+    "addToFindings": "Add chart to report",
+    "alreadyInFindings": "Already in report — click to open",
+    "takeawayPlaceholder": "(Write your takeaway here…)",
+    "chartNumberFallback": "Chart {{number}}",
     "backToEditor": "Back to editor",
     "editReport": "Edit report",
     "doneEditing": "Done editing",

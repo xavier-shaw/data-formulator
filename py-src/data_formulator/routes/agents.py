@@ -425,6 +425,9 @@ def analyst_streaming():
                     max_iterations=max_iterations,
                     max_repair_attempts=max_repair_attempts,
                     identity_id=identity_id,
+                    # Study modes gate the report skill (participants author
+                    # their own findings report); None/default leaves it on.
+                    analysis_mode=analysis_mode if prompt_profile is not None else None,
                 )
 
             trajectory = None

@@ -157,15 +157,19 @@ class SkillRegistry:
                 return name
         return None
 
-    def render_registry_block(self) -> str:
+    def render_registry_block(self, exclude: tuple[str, ...] = ()) -> str:
         """Tier-1 progressive-disclosure listing for the base prompt.
 
         One line per gated skill: name, the actions it unlocks, and a short
         ``when_to_use``/``description``. Bodies are pulled on demand via
-        ``load_skill``; only this cheap index stays resident.
+        ``load_skill``; only this cheap index stays resident. ``exclude``
+        hides skills that are hard-gated for the run (e.g. the report skill
+        in the study modes) so the model isn't invited to load them.
         """
         lines: list[str] = []
         for name in self.gated_skill_names():
+            if name in exclude:
+                continue
             meta = self.metas[name]
             blurb = (meta.when_to_use or meta.description or "").strip().replace("\n", " ")
             unlocks = ", ".join(meta.action_names) if meta.action_names else "(no actions)"

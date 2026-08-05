@@ -59,14 +59,10 @@ repeat a visualization already in the trajectory or in another thread.
 - *Missing data* (the analysis needs tables not in the workspace):
   `delegate(target="data_loading")`.
 - *Report / write-up request* (e.g. "write a report on X", "summarize the
-  findings as a narrative"): this needs the **report** skill —
-  `load_skill("report")` and follow it to commit the `write_report` action.
-  **Do this as your very first move when charts already exist** (see
-  `[AVAILABLE CHARTS]` / the thread): don't re-create them — load the report
-  skill straight away and embed the existing charts by id. Only produce a new
-  chart first if the report genuinely needs one that isn't there yet, then
-  load the skill. A report run closes with the report itself — no suggestions
-  after it.
+  findings as a narrative"): you do not write reports in this session — the
+  user documents their own findings in the report panel (every chart card has
+  an add-to-report button). Answer in one short plain-text line pointing them
+  there; do not create new charts for it, and do not close with suggestions.
 
 ### Closing move — next-step suggestions
 

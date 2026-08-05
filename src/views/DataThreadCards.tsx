@@ -22,6 +22,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { AnchorIcon } from '../icons';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddchartIcon from '@mui/icons-material/Addchart';
+import CheckIcon from '@mui/icons-material/Check';
 
 import { TriggerCard } from './EncodingShelfCard';
 import { ComponentBorderStyle, shadow, transition } from '../app/tokens';
@@ -30,7 +31,13 @@ import { ComponentBorderStyle, shadow, transition } from '../app/tokens';
 // ─── Chart Card ──────────────────────────────────────────────────────────────
 
 export let buildChartCard = (
-    chartElement: { tableId: string, chartId: string, element: any, onDelete?: () => void, deleteTooltip?: string, unread?: boolean },
+    chartElement: {
+        tableId: string, chartId: string, element: any,
+        onDelete?: () => void, deleteTooltip?: string, unread?: boolean,
+        // Study conditions: append this chart to the participant findings report.
+        // `addedToReport` flips the icon to a check; clicking then just opens the report.
+        onAddToReport?: () => void, addedToReport?: boolean, addToReportTooltip?: string,
+    },
     focusedChartId?: string,
 ) => {
     let selectedClassName = focusedChartId == chartElement.chartId ? 'selected-card' : '';
@@ -78,25 +85,45 @@ export let buildChartCard = (
                 }} />
             )}
         </Card>
-        {chartElement.onDelete && (
-            <Tooltip title={chartElement.deleteTooltip ?? ''}>
-                <IconButton
-                    className="data-thread-chart-delete-btn-external"
-                    size="small"
-                    color="error"
-                    aria-label={chartElement.deleteTooltip ?? 'delete chart'}
-                    sx={{
-                        alignSelf: 'flex-start',
-                        ml: 0.25,
-                        padding: 0.5,
-                        flexShrink: 0,
-                        '&:hover': { transform: 'scale(1.15)' },
-                    }}
-                    onClick={(event) => { event.stopPropagation(); chartElement.onDelete?.(); }}
-                >
-                    <DeleteIcon sx={{ fontSize: 16 }} />
-                </IconButton>
-            </Tooltip>
+        {(chartElement.onAddToReport || chartElement.onDelete) && (
+            <Stack direction="column" sx={{ alignSelf: 'flex-start', ml: 0.25, flexShrink: 0 }}>
+                {chartElement.onAddToReport && (
+                    <Tooltip title={chartElement.addToReportTooltip ?? ''}>
+                        <IconButton
+                            className="data-thread-chart-delete-btn-external"
+                            size="small"
+                            color={chartElement.addedToReport ? 'success' : 'primary'}
+                            aria-label={chartElement.addToReportTooltip ?? 'add chart to report'}
+                            sx={{
+                                padding: 0.5,
+                                '&:hover': { transform: 'scale(1.15)' },
+                            }}
+                            onClick={(event) => { event.stopPropagation(); chartElement.onAddToReport?.(); }}
+                        >
+                            {chartElement.addedToReport
+                                ? <CheckIcon sx={{ fontSize: 16 }} />
+                                : <AddchartIcon sx={{ fontSize: 16 }} />}
+                        </IconButton>
+                    </Tooltip>
+                )}
+                {chartElement.onDelete && (
+                    <Tooltip title={chartElement.deleteTooltip ?? ''}>
+                        <IconButton
+                            className="data-thread-chart-delete-btn-external"
+                            size="small"
+                            color="error"
+                            aria-label={chartElement.deleteTooltip ?? 'delete chart'}
+                            sx={{
+                                padding: 0.5,
+                                '&:hover': { transform: 'scale(1.15)' },
+                            }}
+                            onClick={(event) => { event.stopPropagation(); chartElement.onDelete?.(); }}
+                        >
+                            <DeleteIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                    </Tooltip>
+                )}
+            </Stack>
         )}
     </Box>
 }

@@ -15,13 +15,14 @@ import { alpha } from '@mui/material/styles';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ImageIcon from '@mui/icons-material/Image';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import html2canvas from 'html2canvas';
 import { useDispatch, useSelector } from 'react-redux';
-import { DataFormulatorState, dfActions, dfSelectors, GeneratedReport } from '../app/dfSlice';
+import { DataFormulatorState, dfActions, dfSelectors, GeneratedReport, FINDINGS_REPORT_ID } from '../app/dfSlice';
 import { Message } from './MessageSnackbar';
 import { DictTable } from '../components/ComponentType';
 import { AppDispatch } from '../app/store';
@@ -41,10 +42,11 @@ export const ReportView: FC = () => {
     const config = useSelector((state: DataFormulatorState) => state.config);
     const allGeneratedReports = useSelector(dfSelectors.getAllGeneratedReports);
     const serverConfig = useSelector((state: DataFormulatorState) => state.serverConfig);
-    const focusedId = useSelector((state: DataFormulatorState) => state.focusedId);
+    // The report shown in this panel — independent of the canvas focus, so
+    // the report can be read next to whatever chart/table is focused.
+    const focusedReportId = useSelector((state: DataFormulatorState) => state.focusedReportId);
     // Thumbnails live in their own slice so updates don't churn `state.charts`.
     const chartThumbnails = useSelector((state: DataFormulatorState) => state.chartThumbnails) || {};
-    const focusedChartId = focusedId?.type === 'chart' ? focusedId.chartId : undefined;
     const theme = useTheme();
     const { t } = useTranslation();
 
@@ -483,9 +485,10 @@ ${styles}
         }
     }, [currentReportId]);
 
-    // Always return to read mode when switching reports or while a report is generating.
+    // Agent reports open read-first; the participant findings report opens
+    // ready to type (its whole point is writing takeaways).
     useEffect(() => {
-        setIsEditMode(false);
+        setIsEditMode(currentReportId === FINDINGS_REPORT_ID);
     }, [currentReportId]);
 
     useEffect(() => {
@@ -493,16 +496,6 @@ ${styles}
             setIsEditMode(false);
         }
     }, [isGenerating]);
-
-    // Derive focused report ID from Redux state
-    const focusedReportId = focusedId?.type === 'report' ? focusedId.reportId : undefined;
-
-    // When focused report is cleared, go back to editor view
-    useEffect(() => {
-        if (!focusedReportId && !isGenerating) {
-            dispatch(dfActions.setViewMode('editor'));
-        }
-    }, [focusedReportId]);
 
     // When a report is focused via the thread, load it automatically
     // Re-runs when charts/tables load so images render on initial page load.
@@ -517,6 +510,19 @@ ${styles}
             return () => clearTimeout(timer);
         }
     }, [focusedReportId, charts, tables, chartThumbnails]);
+
+    // Reload when the focused report's content changed OUTSIDE this editor —
+    // e.g. "add chart to report" appends a section while the pane is open.
+    // The content-equality guard filters out editor-originated updates
+    // (onUpdate sets local state before dispatching), so typing never re-runs
+    // loadReport (no per-keystroke blob-URL churn).
+    const focusedReport = allGeneratedReports.find(r => r.id === focusedReportId);
+    useEffect(() => {
+        if (!focusedReportId || !focusedReport) return;
+        if (focusedReport.status === 'generating') return;   // the streaming sync below owns this
+        if (currentReportId === focusedReportId && focusedReport.content === generatedReport) return;
+        loadReport(focusedReportId);
+    }, [focusedReport?.updatedAt]);
 
     // Keep local content in sync with Redux during streaming (status === 'generating')
     useEffect(() => {
@@ -591,21 +597,9 @@ ${styles}
 
     const deleteReport = (reportId: string, event: React.MouseEvent) => {
         event.stopPropagation(); // Prevent triggering the card click
+        // The reducer moves focusedReportId to the next remaining report (or
+        // closes the panel); the focusedReportId effect above reloads content.
         dispatch(dfActions.deleteGeneratedReport(reportId));
-        
-        // If we're deleting the currently viewed report, switch to another report or clear the view
-        if (currentReportId === reportId) {
-            const remainingReports = allGeneratedReports.filter(r => r.id !== reportId);
-            if (remainingReports.length > 0) {
-                // Switch to the first remaining report
-                loadReport(remainingReports[0].id);
-            } else {
-                // No reports left, go back to editor
-                setCurrentReportId(undefined);
-                setGeneratedReport('');
-                dispatch(dfActions.setViewMode('editor'));
-            }
-        }
     };
 
     let displayedReport = generatedReport;
@@ -633,6 +627,18 @@ ${styles}
     return (
         <Box sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Box sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+                    {/* Close the report panel — returns to the two-column layout */}
+                    <Box sx={{ position: 'absolute', top: 12, right: 16, zIndex: 10 }}>
+                        <Tooltip title={t('report.closePanel')} placement="left">
+                            <IconButton
+                                size="small"
+                                onClick={() => dispatch(dfActions.closeReportView())}
+                                sx={floatingPillSx}
+                            >
+                                <CloseIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
+                        </Tooltip>
+                    </Box>
                     {/* Floating action buttons — left side */}
                     <Box sx={{
                         position: 'absolute',
@@ -737,11 +743,16 @@ ${styles}
                             </Tooltip>
                         )}
                     </Box>
-                    {/* Continuous canvas — content flows cleanly */}
-                    <Box sx={{ 
-                        height: '100%', overflow: 'auto', 
+                    {/* Continuous canvas — content flows cleanly. Horizontal
+                        padding keeps the text clear of the floating pill
+                        columns now that the report renders in a side panel
+                        that is routinely narrower than the 816px column. */}
+                    <Box sx={{
+                        height: '100%', overflow: 'auto',
                         display: 'flex', justifyContent: 'center',
+                        px: 7, boxSizing: 'border-box',
                     }}>
+
                         <Box
                             data-report-content
                             sx={{

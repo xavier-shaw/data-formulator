@@ -8,7 +8,8 @@
 // analysis graph can show a facilitator where the analyst's attention went.
 //
 // "Active" means all of:
-//   - the focused item is a chart and the app is in editor mode,
+//   - the focused item is a chart (the report side panel may be open too —
+//     the canvas stays visible next to it, so viewing still counts),
 //   - the browser tab is visible,
 //   - the user has produced some input (pointer/key/wheel) within the last
 //     IDLE_MS — reading a chart hands-off still counts, walking away doesn't,
@@ -70,10 +71,9 @@ const isPaused = () => pauseCount > 0;
 export const useChartUsageTracker = () => {
     const dispatch = useDispatch<AppDispatch>();
     const focusedId = useSelector((s: DataFormulatorState) => s.focusedId);
-    const viewMode = useSelector((s: DataFormulatorState) => s.viewMode);
     const sessionLoading = useSelector((s: DataFormulatorState) => s.sessionLoading);
 
-    const trackedId = !sessionLoading && viewMode === 'editor' && focusedId?.type === 'chart'
+    const trackedId = !sessionLoading && focusedId?.type === 'chart'
         ? focusedId.chartId : null;
 
     const trackedRef = useRef<string | null>(null);

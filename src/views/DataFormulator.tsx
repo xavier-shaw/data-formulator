@@ -465,8 +465,9 @@ export const DataFormulatorFC = ({ }) => {
         }
         const snapped = threadPaneWidth(bestCols);
         if (Math.abs(raw - snapped) > 2) {
-            const totalWidth = sizes.reduce((a, b) => a + b, 0);
-            allotmentRef.current.resize([snapped, totalWidth - snapped]);
+            // Absorb the snap delta into the middle (canvas) pane so a
+            // third report pane, when open, keeps its size.
+            allotmentRef.current.resize([snapped, sizes[1] + (raw - snapped), ...sizes.slice(2)]);
         }
     }, []);
 
@@ -539,6 +540,9 @@ export const DataFormulatorFC = ({ }) => {
         // so the Allotment only has one child – calling resize with two
         // sizes would crash (accessing .minimumSize on an undefined pane).
         if (tables.length === 0) return;
+        // While the report panel is open there are three panes; this
+        // two-pane resize doesn't apply (the close handler restores sizes).
+        if (viewMode === 'report') return;
         const totalWidth = containerRef.current.clientWidth;
         if (totalWidth <= 0) return;
 
@@ -567,9 +571,40 @@ export const DataFormulatorFC = ({ }) => {
             });
             return () => cancelAnimationFrame(rafId);
         }
-    }, [threadCount, tables.length]);
+    }, [threadCount, tables.length, viewMode]);
 
-    const fixedSplitPane = ( 
+    // When the report panel opens/closes, re-balance the panes: shrink the
+    // thread pane to one column while the report is open (three columns need
+    // the room), and restore the two-column default when it closes.
+    const prevViewModeRef = useRef(viewMode);
+    useEffect(() => {
+        const prev = prevViewModeRef.current;
+        prevViewModeRef.current = viewMode;
+        if (prev === viewMode) return;
+        if (!allotmentRef.current || !containerRef.current) return;
+        if (tables.length === 0) return;
+        // Defer to the next frame so the Allotment has mounted/unmounted the
+        // report pane before we resize.
+        const rafId = requestAnimationFrame(() => {
+            try {
+                const w = containerRef.current?.clientWidth ?? 0;
+                if (w <= 0) return;
+                if (viewMode === 'report') {
+                    const threadW = threadPaneWidth(1);
+                    const reportW = Math.max(360, Math.min(700, Math.round(w * 0.42)));
+                    allotmentRef.current?.resize([threadW, Math.max(300, w - threadW - reportW), reportW]);
+                } else {
+                    const threadW = threadPaneWidth(2);
+                    allotmentRef.current?.resize([threadW, w - threadW]);
+                }
+            } catch {
+                // Allotment pane structure may not yet match; ignore.
+            }
+        });
+        return () => cancelAnimationFrame(rafId);
+    }, [viewMode, tables.length]);
+
+    const fixedSplitPane = (
         <Box sx={{display: 'flex', flexDirection: 'row', height: '100%'}}>
             <DataSourceSidebar
                 onOpenUploadDialog={(tab) => openUploadDialog((tab ?? 'menu') as UploadTabType)}
@@ -584,11 +619,11 @@ export const DataFormulatorFC = ({ }) => {
                     position: 'relative'}}>
                 <Allotment ref={allotmentRef} onDragEnd={snapToColumns} proportionalLayout={false}>
                     {tables.length > 0 ? (
-                        <Allotment.Pane minSize={threadPaneWidth(1)} 
-                                preferredSize={threadPaneWidth(preferredColumns)} 
+                        <Allotment.Pane minSize={threadPaneWidth(1)}
+                                preferredSize={threadPaneWidth(preferredColumns)}
                                 maxSize={threadPaneWidth(3)} snap={false}>
                             <DataThread sx={{
-                                display: 'flex', 
+                                display: 'flex',
                                 flexDirection: 'column',
                                 overflow: 'hidden',
                                 alignContent: 'flex-start',
@@ -598,13 +633,19 @@ export const DataFormulatorFC = ({ }) => {
                     ) : null}
                     <Allotment.Pane minSize={300}>
                         <Box sx={{ ...borderBoxStyle, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
-                            {viewMode === 'editor' ? (
-                                visPane
-                            ) : (
-                                <ReportView />
-                            )}
+                            {visPane}
                         </Box>
                     </Allotment.Pane>
+                    {/* Report panel — a third column that coexists with the
+                        thread pane and the chart canvas instead of replacing
+                        the canvas. Mounted only while a report is open. */}
+                    {viewMode === 'report' ? (
+                        <Allotment.Pane minSize={360} preferredSize="42%" snap={false}>
+                            <Box sx={{ ...borderBoxStyle, ml: '6px', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', backgroundColor: 'white' }}>
+                                <ReportView />
+                            </Box>
+                        </Allotment.Pane>
+                    ) : null}
                 </Allotment>
             </Box>
         </Box>

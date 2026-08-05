@@ -32,7 +32,7 @@ import {
 import '../scss/VisualizationView.scss';
 import { useTranslation } from 'react-i18next';
 import { batch, useDispatch, useSelector } from 'react-redux';
-import { DataFormulatorState, dfActions, dfSelectors, SSEMessage, GeneratedReport } from '../app/dfSlice';
+import { DataFormulatorState, dfActions, dfSelectors, SSEMessage, GeneratedReport, FINDINGS_REPORT_ID, reportContainsChart } from '../app/dfSlice';
 import { getTriggers, getUrls, fetchWithIdentity } from '../app/utils';
 import { apiRequest } from '../app/apiClient';
 import { extractErrorMessage } from '../app/errorHandler';
@@ -864,6 +864,8 @@ let SingleThreadGroupView: FC<{
 
     let charts = useSelector(dfSelectors.getAllCharts);
     let focusedId = useSelector((state: DataFormulatorState) => state.focusedId);
+    // The report open in the side panel (cleared when the panel closes).
+    let focusedReportId = useSelector((state: DataFormulatorState) => state.focusedReportId);
     let focusedChartId = focusedId?.type === 'chart' ? focusedId.chartId : undefined;
     let focusedTableId = useMemo(() => {
         if (!focusedId) return undefined;
@@ -1590,7 +1592,7 @@ let SingleThreadGroupView: FC<{
     // live generating card, rendered inside the running draft block so it sits
     // below the prompt + thinking steps rather than above them).
     const buildReportTimelineItem = (report: GeneratedReport, highlighted: boolean) => {
-        const isFocused = focusedId?.type === 'report' && focusedId.reportId === report.id;
+        const isFocused = focusedReportId === report.id;
         const rowHL = highlighted || isFocused;
         const isGenerating = report.status === 'generating';
         const gutterIcon = isGenerating
@@ -2908,13 +2910,20 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     let focusedId = useSelector((state: DataFormulatorState) => state.focusedId);
     let charts = useSelector(dfSelectors.getAllCharts);
 
-    let generatedReports = useSelector(dfSelectors.getAllGeneratedReports);
     // Mirrors SingleThreadGroupView: study conditions hide agent summary
     // entries, so the split heuristics shouldn't count them either.
     const hideAgentSummaries = useSelector((state: DataFormulatorState) =>
         (state.config.studyCondition ?? 'default') !== 'default');
 
-    // Derive focusedTableId from focusedId for scroll/highlight logic
+    // Study conditions: participants curate charts into their own findings
+    // report via a per-chart "add to report" button on the thread cards.
+    const isStudyCondition = useSelector((state: DataFormulatorState) =>
+        (state.config.studyCondition ?? 'default') !== 'default');
+    const findingsReport = useSelector((state: DataFormulatorState) =>
+        state.generatedReports.find(r => r.id === FINDINGS_REPORT_ID));
+
+    // Derive focusedTableId from focusedId for scroll/highlight logic.
+    // (Reports no longer take canvas focus — they open in the side panel.)
     let focusedTableId = useMemo(() => {
         if (!focusedId) return undefined;
         if (focusedId.type === 'table') return focusedId.tableId;
@@ -2922,12 +2931,8 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
             const chart = charts.find(c => c.id === focusedId.chartId);
             return chart?.tableRef;
         }
-        if (focusedId.type === 'report') {
-            const report = generatedReports.find(r => r.id === focusedId.reportId);
-            return report?.triggerTableId;
-        }
         return undefined;
-    }, [focusedId, charts, generatedReports]);
+    }, [focusedId, charts]);
 
     let chartSynthesisInProgress = useSelector((state: DataFormulatorState) => state.chartSynthesisInProgress);
 
@@ -3138,6 +3143,10 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                     dispatch(dfActions.setFocused({ type: 'chart', chartId: chart.id }));
                 }}
             />;
+            // Study conditions: per-chart "add to report" (not on Table/Auto/'?'
+            // charts — they have no renderable image for the report embed).
+            const reportEligible = isStudyCondition && !['Table', 'Auto', '?'].includes(chart.chartType);
+            const addedToReport = reportEligible && reportContainsChart(findingsReport, chart.id);
             return {
                 chartId: chart.id,
                 tableId: table.id,
@@ -3145,9 +3154,27 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                 onDelete: () => { dispatch(dfActions.deleteChartById(chart.id)); },
                 deleteTooltip: t('dataThread.deleteChart'),
                 unread: !!chart.unread,
+                ...(reportEligible ? {
+                    addedToReport,
+                    addToReportTooltip: addedToReport ? t('report.alreadyInFindings') : t('report.addToFindings'),
+                    onAddToReport: () => {
+                        // ensure → add → focus run synchronously in dispatch order,
+                        // so creation is race-free and the add is idempotent.
+                        dispatch(dfActions.ensureFindingsReport({ title: t('report.myFindingsTitle') }));
+                        const heading = chart.title?.trim()
+                            || t('report.chartNumberFallback', { number: (findingsReport?.selectedChartIds.length ?? 0) + 1 });
+                        dispatch(dfActions.addChartToReport({
+                            reportId: FINDINGS_REPORT_ID,
+                            chartId: chart.id,
+                            heading,
+                            placeholder: t('report.takeawayPlaceholder'),
+                        }));
+                        dispatch(dfActions.setFocused({ type: 'report', reportId: FINDINGS_REPORT_ID }));
+                    },
+                } : {}),
             };
         });
-    }, [charts, tables, conceptShelfItems, chartSynthesisInProgress]);
+    }, [charts, tables, conceptShelfItems, chartSynthesisInProgress, isStudyCondition, findingsReport]);
 
     // anchors are considered leaf tables to simplify the view
 

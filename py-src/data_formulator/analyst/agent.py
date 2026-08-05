@@ -84,6 +84,19 @@ _CORE_SKILL = "core"
 _SKILL_LOADED_BANNER = "[SKILL LOADED: {name}]"
 _SKILL_LOADED_RE = re.compile(r"^\[SKILL LOADED: ([^\]]+)\]")
 
+# ── Report-skill gate (user study) ────────────────────────────────────────
+# In the study modes the participant documents their own findings in the
+# report panel (per-chart "add to report" buttons), so the agent must not
+# write reports for them. Default mode (analysis_mode=None) keeps the skill.
+_REPORT_SKILL = "report"
+_REPORT_GATED_MODES = frozenset({"executor", "analyst", "analyst_guided"})
+_REPORT_GATE_MESSAGE = (
+    "Report writing is not available in this session: the user documents "
+    "their own findings in the report panel (every chart card has an "
+    "add-to-report button). Do not write a report or recreate one in chat; "
+    "answer in short plain text pointing the user to the report panel."
+)
+
 # ── Action-argument coercion ──────────────────────────────────────────────
 # Weaker models sometimes JSON-encode a nested action argument as a string
 # (e.g. ``"chart": "{...}"``). Parse those back to objects before dispatch so
@@ -189,8 +202,7 @@ keeping them straight is essential:
   **independent** — none depends on another's result — so call as many as you
   need, across as many rounds as you need, until you have enough to act.
 - **Actions** (committing — shown to the user). A discrete operation like
-  `visualize`, `ask_user`, `delegate`, and (once the report skill is loaded)
-  `write_report`. Each renders a user-visible surface, and its result is
+  `visualize`, `ask_user`, `delegate`{write_report_mention}. Each renders a user-visible surface, and its result is
   returned to you just like a tool result so you can react to it.
 
 **Actions are sequential — take exactly one, then wait for its result.** This is
@@ -297,6 +309,7 @@ class AnalystAgent:
         max_iterations: int = 5,
         max_repair_attempts: int = 2,
         identity_id: str | None = None,
+        analysis_mode: str | None = None,
     ):
         self.client = client
         self.workspace = workspace
@@ -307,6 +320,9 @@ class AnalystAgent:
         # taxonomy), loaded from modes/<name>.md. Defaults to the Default mode's
         # profile (the unmodified product prompt); Executor/Analyst pass their own.
         self.prompt_profile = prompt_profile or load_mode("default").profile
+        # Study mode name ('executor' / 'analyst' / 'analyst_guided') or None
+        # for Default. Study modes gate the report skill (_REPORT_GATED_MODES).
+        self.analysis_mode = analysis_mode
         self.language_instruction = language_instruction
         self.max_iterations = max_iterations
         self.max_repair_attempts = max_repair_attempts
@@ -562,11 +578,18 @@ class AnalystAgent:
                     continue
                 if owner not in self._loaded_skills:
                     # Gate closed — tell the model to load the skill, no execution.
+                    # Study modes: the report skill is unavailable outright, so
+                    # don't send the model into a load→refuse→retry loop.
+                    if owner == _REPORT_SKILL and self._report_skill_gated():
+                        gate_message = f"[GATED] {_REPORT_GATE_MESSAGE}"
+                    else:
+                        gate_message = (
+                            f"[GATED] The '{action_type}' action requires the "
+                            f"'{owner}' skill. Call load_skill(\"{owner}\") first, "
+                            "follow its instructions, then emit the action again."
+                        )
                     self._set_action_observation(
-                        trajectory, action_tool_call_id,
-                        f"[GATED] The '{action_type}' action requires the "
-                        f"'{owner}' skill. Call load_skill(\"{owner}\") first, "
-                        "follow its instructions, then emit the action again.",
+                        trajectory, action_tool_call_id, gate_message,
                     )
                     rlog.log("action_gated", action=action_type, skill=owner,
                              iteration=iteration)
@@ -675,7 +698,16 @@ class AnalystAgent:
             if m:
                 name = m.group(1).strip()
                 if self.registry.has(name):
+                    # Study modes: never rehydrate the gated report skill — a
+                    # banner for it can't legitimately exist in a study-mode
+                    # trajectory, so a pasted/forged one must not open the gate.
+                    if name == _REPORT_SKILL and self._report_skill_gated():
+                        continue
                     self._loaded_skills.add(name)
+
+    def _report_skill_gated(self) -> bool:
+        """Study modes disable the report skill (see _REPORT_GATE_MESSAGE)."""
+        return self.analysis_mode in _REPORT_GATED_MODES
 
     def _load_skill_into_context(
         self, name: str, trajectory: list[dict],
@@ -708,6 +740,11 @@ class AnalystAgent:
         the caller controls *when* it lands so message ordering stays
         provider-valid. Idempotent — loading twice yields ``body_msg=None``.
         """
+        # Single hard gate: covers the live load_skill tool call and the
+        # _load_skill_into_context wrapper. The skill never enters
+        # _loaded_skills, so its actions stay gated too.
+        if name == _REPORT_SKILL and self._report_skill_gated():
+            return False, _REPORT_GATE_MESSAGE, None
         if not self.registry.has(name):
             return False, f"Unknown skill: {name!r}", None
         if name in self._loaded_skills:
@@ -1183,13 +1220,22 @@ class AnalystAgent:
                 "- **[OTHER THREADS]**: Brief summaries of other exploration threads in this workspace. "
             )
         if has_charts:
-            context_lines.append(
-                "- **[AVAILABLE CHARTS]**: Charts the user already created (with their "
-                "ids, types, and encodings). These already exist — build on them or "
-                "reference them; do not re-create an equivalent chart. When asked to "
-                "write up / summarize / report on the exploration, load the `report` "
-                "skill and embed these by id rather than producing new visualizations."
-            )
+            if self._report_skill_gated():
+                context_lines.append(
+                    "- **[AVAILABLE CHARTS]**: Charts the user already created (with their "
+                    "ids, types, and encodings). These already exist — build on them or "
+                    "reference them; do not re-create an equivalent chart. The user "
+                    "curates these charts into their own findings report themselves; "
+                    "you never write reports."
+                )
+            else:
+                context_lines.append(
+                    "- **[AVAILABLE CHARTS]**: Charts the user already created (with their "
+                    "ids, types, and encodings). These already exist — build on them or "
+                    "reference them; do not re-create an equivalent chart. When asked to "
+                    "write up / summarize / report on the exploration, load the `report` "
+                    "skill and embed these by id rather than producing new visualizations."
+                )
         if has_attached_images:
             context_lines.append(
                 "- **[USER ATTACHMENT(S)]**: Image(s) provided by the user. "
@@ -1202,7 +1248,9 @@ class AnalystAgent:
         # the skills mechanism — not in the per-run user message. The only truly
         # dynamic skill data is a loaded skill body, which arrives as a
         # ``load_skill`` tool result.
-        skills_block = self.registry.render_registry_block() or "_(no loadable skills)_"
+        skills_block = self.registry.render_registry_block(
+            exclude=(_REPORT_SKILL,) if self._report_skill_gated() else (),
+        ) or "_(no loadable skills)_"
 
         # Fill the system frame's slots via plain substitution (brace-safe: any
         # other braces in the text stay literal). The frame is the agent's own
@@ -1214,6 +1262,13 @@ class AnalystAgent:
             "{skills_block}": skills_block,
             "{max_iterations}": str(self.max_iterations),
             "{agent_exploration_rules}": rules_block,
+            # Reconstructs the original actions sentence byte-identically in
+            # non-gated runs; study modes drop the write_report mention.
+            "{write_report_mention}": (
+                ""
+                if self._report_skill_gated()
+                else ", and (once the report skill is loaded)\n  `write_report`"
+            ),
         }
         prompt = SYSTEM_PROMPT
         for slot, value in substitutions.items():
