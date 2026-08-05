@@ -554,7 +554,11 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                                                 {t('chartRec.explanationFollowupsLabel')}
                                             </Typography>
                                         )}
-                                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {/* One option per row, stretched full
+                                            width — the same vertical stack the
+                                            starter suggestions use, so a click
+                                            target reads the same either way. */}
+                                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
                                             {(question.options || []).map((option, optionIndex) => {
                                                 const selected = selectedAnswers?.[questionIndex];
                                                 const isSelected = selected?.source === 'option' && selected.answer === option.label;
@@ -577,7 +581,8 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                                                                 cursor: 'pointer',
                                                                 fontSize: 11,
                                                                 fontWeight: isSelected ? 600 : 400,
-                                                                display: 'inline-block',
+                                                                display: 'block',
+                                                                width: '100%',
                                                                 whiteSpace: 'normal',
                                                                 wordBreak: 'break-word',
                                                                 lineHeight: 1.4,

@@ -74,11 +74,21 @@ stop. Shape it as **one** question:
   — interpreting the charts is the user's job; your reading stays internal
   and is never shown.
 - `required: false`, `responseType: "single_choice"`.
-- `options` — 2–3 next-step suggestions. Each is a concrete, chart-producing
-  instruction in the user's voice (≤8 words, e.g. "Break daily sales down by
-  region"), executable as-is: name the data and the operation. Phrase each as
-  an analysis **move** to take next, never as a claim about what the data
-  shows.
+- `options` — 2–3 next-step suggestions. Each option is written as
+  **action (goal)** — two parts, in this exact shape:
+  1. *The action* — a concrete, chart-producing instruction in the user's
+     voice (≤8 words), executable as-is: name the data and the operation.
+  2. *The goal* — in parentheses immediately after, ≤6 words, plain language:
+     what taking this move would let the user find out.
+
+  For example: `Break daily sales down by region (see where growth
+  concentrates)` · `Split price by fuel grade (check if the gap widens)`.
+
+  Both parts describe a **move and its purpose**, never a claim about what the
+  data shows: the goal says what the user could *find out*, not what they
+  *would* find. Write "(see whether the spike repeats yearly)", never "(the
+  spike repeats yearly)". Keep the goal concrete and jargon-free — no
+  restating the action, no hedged filler like "learn more about it".
 
 Ground every suggestion in what this run actually showed, and make the set
 meaningfully distinct: prefer one option that **deepens** the current line
