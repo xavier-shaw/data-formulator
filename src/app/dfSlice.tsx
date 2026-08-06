@@ -10,6 +10,7 @@ import { getChartTemplate, getChartChannels } from "../components/ChartTemplates
 import { vlAdaptChart, vlRecommendEncodings } from '../lib/agents-chart';
 import { getDataTable } from '../views/ChartUtils';
 import { getTriggers, getUrls, computeContentHash } from './utils';
+import { buildThreadContext, resolveRootTableId } from './threadContext';
 import { apiRequest } from './apiClient';
 import { deleteTablesFromWorkspace } from './workspaceService';
 import i18n from '../i18n';
@@ -125,10 +126,17 @@ export interface ChartUsageEntry {
 /**
  * Study telemetry: one entry per successful "add chart to report" click, in
  * order. Persisted with the workspace alongside `chartUsage`.
+ *
+ * `prefilled` marks adds whose takeaway text was seeded from the agent's
+ * chart caption (describe_chart) rather than the empty placeholder;
+ * `prefillText` snapshots that seed so post-hoc analysis can diff the final
+ * report against it (kept verbatim / edited / deleted).
  */
 export interface ReportChartAddEntry {
     chartId: string;
     at: number;
+    prefilled?: boolean;
+    prefillText?: string;
 }
 
 export const DEFAULT_ROW_LIMIT = 2_000_000;
@@ -142,7 +150,7 @@ export interface ClientConfig {
     frontendRowLimit: number; // max rows to keep in browser when loading locally (non-virtual)
     paletteKey: string; // active color palette key from tokens.ts
     miniMode: boolean; // when true, run the single-turn MiniAnalystAgent (for small/local models)
-    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained (user makes every analytical decision); 'analyst' = agent-driven (extends each instruction, closes every run with next-step suggestions)
+    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained (user makes every analytical decision, no suggestion strip); 'analyst' = agent-supported (Level-3 chart captions + the persistent next-step suggestion strip, auto-refreshed after each charting run)
 }
 
 export interface GeneratedReport {
@@ -651,36 +659,81 @@ export const fetchFieldSemanticType = createAsyncThunk(
 );
 
 /**
- * Generate a few short, table-tailored starter exploration questions for the
- * currently focused root table. Called (debounced) when a root table is
- * focused and it has no fresh questions for the current table-set signature.
- * The focused table is the "primary" table; all root tables are passed as
- * context so the agent can add a cross-table question when relevant.
- * Dispatches `startStarterQuestions` up front, then `setStarterQuestions` /
- * `setStarterQuestionsError`. Results are only applied if the signature is
- * still current (guards against stale responses when data changed mid-flight).
+ * Freshness key for the cached suggestion strip: table set + recipe version,
+ * so a recipe change regenerates without touching the id list. Bump the
+ * version whenever the suggestion prompt/format changes.
  */
-export const generateStarterQuestions = createAsyncThunk(
-    "dataFormulatorSlice/generateStarterQuestions",
-    async (arg: { tableId: string; signature: string; tableIds: string[] }, { getState, dispatch }) => {
+export const SUGGESTION_RECIPE_VERSION = 'v4';
+export const computeSuggestionSignature = (rootTables: DictTable[]) =>
+    `${rootTables.map(t => t.id).sort().join('|')}#${SUGGESTION_RECIPE_VERSION}`;
+
+/**
+ * Generate next-step suggestions for the persistent suggestion strip (the
+ * "starter" chips above the chat input — one cached set per ROOT table).
+ * One-shot LLM call, entirely decoupled from the analyst run lifecycle.
+ *
+ * Triggers (all dispatch this thunk; the executor study condition never
+ * generates):
+ *  - session start / focus on a table with no fresh set (component effect,
+ *    debounced; the thunk's own freshness guard makes stray dispatches no-op),
+ *  - a charting run completing (`force: true`, grounded in the run's thread),
+ *  - the ideation button (`force: true`).
+ *
+ * `contextTableId` is the table/chart the suggestions should ground in —
+ * usually the focused (possibly derived) table or the run's last created
+ * table. The thunk resolves it to its root for storage, and sends the
+ * root-set tables plus the thread context (Tier 2 + Tier 3) so near moves
+ * ground in the latest charts and far moves in the whole trajectory.
+ * Results are only applied if the signature is still current (guards against
+ * stale responses when data changed mid-flight).
+ */
+export const generateSuggestions = createAsyncThunk(
+    "dataFormulatorSlice/generateSuggestions",
+    async (arg: { contextTableId?: string; force?: boolean } | undefined, { getState, dispatch }) => {
         const state = getState() as DataFormulatorState;
+        if ((state.config.studyCondition ?? 'default') === 'executor') return;
 
-        dispatch(dfActions.startStarterQuestions({ tableId: arg.tableId, signature: arg.signature }));
+        const tables = state.tables;
+        const rootTables = tables.filter(t => t.derive === undefined || t.anchored);
 
-        const inputTables = arg.tableIds
-            .map(id => state.tables.find(t => t.id === id))
-            .filter((t): t is DictTable => !!t)
-            .map(t => ({
-                name: t.id,
-                columns: t.names,
-                sample_rows: (t.rows || []).slice(0, 10),
-                description: typeof t.description === 'string' ? t.description : '',
-            }));
+        // Resolve the grounding table: explicit contextTableId, else the
+        // currently focused table/chart from state.
+        let targetId = arg?.contextTableId;
+        if (!targetId) {
+            const f = state.focusedId;
+            if (f?.type === 'table') targetId = f.tableId;
+            else if (f?.type === 'chart') targetId = collectAllCharts(state).find(c => c.id === f.chartId)?.tableRef;
+        }
+        const rootId = resolveRootTableId(tables, targetId);
+        if (!rootId) return;
+
+        const signature = computeSuggestionSignature(rootTables);
+        if (!arg?.force) {
+            const entry = state.starterQuestions[rootId];
+            if (entry && entry.signature === signature) return;            // already fresh
+            if (state.starterQuestionsStatus[rootId] === 'loading') return; // in flight
+        }
+
+        dispatch(dfActions.startStarterQuestions({ tableId: rootId, signature }));
+
+        const inputTables = rootTables.map(t => ({
+            name: t.id,
+            columns: t.names,
+            sample_rows: (t.rows || []).slice(0, 10),
+            description: typeof t.description === 'string' ? t.description : '',
+        }));
 
         if (inputTables.length === 0) {
-            dispatch(dfActions.setStarterQuestions({ tableId: arg.tableId, signature: arg.signature, questions: [] }));
+            dispatch(dfActions.setStarterQuestions({ tableId: rootId, signature, questions: [] }));
             return;
         }
+
+        // Thread context so near moves ground in what the analysis just
+        // showed (empty on a fresh session → the agent falls back to
+        // starter grounding on the primary table).
+        const { focusedThread, otherThreads } = targetId
+            ? buildThreadContext(tables, collectAllCharts(state), state.conceptShelfItems, targetId)
+            : { focusedThread: undefined, otherThreads: undefined };
 
         try {
             const { data } = await apiRequest(getUrls().DERIVE_STARTER_QUESTIONS, {
@@ -688,18 +741,20 @@ export const generateStarterQuestions = createAsyncThunk(
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     input_tables: inputTables,
-                    primary_table: arg.tableId,
+                    primary_table: rootId,
                     model: dfSelectors.getActiveModel(state),
-                    n: 3,
+                    n: 4,
+                    ...(focusedThread ? { focused_thread: focusedThread } : {}),
+                    ...(otherThreads ? { other_threads: otherThreads } : {}),
                 }),
             });
             const questions: string[] = Array.isArray(data?.result)
                 ? data.result.map((q: any) => String(q)).filter((q: string) => q.trim() !== '')
                 : [];
-            dispatch(dfActions.setStarterQuestions({ tableId: arg.tableId, signature: arg.signature, questions: questions.slice(0, 3) }));
+            dispatch(dfActions.setStarterQuestions({ tableId: rootId, signature, questions: questions.slice(0, 4) }));
         } catch (err) {
-            console.warn('generateStarterQuestions failed', err);
-            dispatch(dfActions.setStarterQuestionsError({ tableId: arg.tableId, signature: arg.signature }));
+            console.warn('generateSuggestions failed', err);
+            dispatch(dfActions.setStarterQuestionsError({ tableId: rootId, signature }));
         }
     }
 );
@@ -1408,6 +1463,18 @@ export const dataFormulatorSlice = createSlice({
                 chart.scaleFactor = action.payload.scaleFactor === 1 ? undefined : action.payload.scaleFactor;
             }
         },
+        // Study modes: the agent's describe_chart action attaches a per-chart
+        // caption (executor: computed data facts; analyst: perceived pattern).
+        // Stored on the Chart like `title`, with the same staleness key, so it
+        // persists with the session and hides once the user edits the chart's
+        // encodings. Re-describing the same chart replaces the caption.
+        setChartDescription: (state, action: PayloadAction<{chartId: string, description: string, descriptionKey?: string}>) => {
+            let chart = collectAllCharts(state).find(c => c.id == action.payload.chartId);
+            if (chart) {
+                chart.description = action.payload.description;
+                chart.descriptionKey = action.payload.descriptionKey;
+            }
+        },
         // --- Style variants (see design-docs/28-chart-style-refinement-agent.md) ---
         // Variants are user-authored "skins" of a chart's Vega-Lite spec. They live
         // on Chart, persist with the session, and drive both the focused canvas
@@ -1994,16 +2061,20 @@ export const dataFormulatorSlice = createSlice({
             }
         },
         /**
-         * Append a chart section (heading + embed + takeaway placeholder) to a
-         * report — the participant findings report in the study conditions.
+         * Append a chart section (heading + embed + takeaway) to a report —
+         * the participant findings report in the study conditions. The
+         * takeaway paragraph is the agent's chart caption when one exists
+         * (`takeaway`, rendered as normal editable text), otherwise the
+         * italicized "write your takeaway" `placeholder`.
          * Format-aware: content is markdown until the first TipTap edit stores
          * editor.getHTML(), so append in whichever format the report is in.
          * Idempotent against CONTENT (not selectedChartIds), so double-clicks
          * no-op and re-adding works after the user deleted the section.
          * `heading`/`placeholder` arrive pre-translated (reducers stay i18n-free).
          */
-        addChartToReport: (state, action: PayloadAction<{ reportId: string; chartId: string; heading: string; placeholder: string }>) => {
+        addChartToReport: (state, action: PayloadAction<{ reportId: string; chartId: string; heading: string; placeholder: string; takeaway?: string }>) => {
             const { reportId, chartId, heading, placeholder } = action.payload;
+            const takeaway = action.payload.takeaway?.trim() || undefined;
             const report = state.generatedReports.find(r => r.id === reportId);
             if (!report) return;
             if (reportContainsChart(report, chartId)) return;
@@ -2016,13 +2087,17 @@ export const dataFormulatorSlice = createSlice({
                     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                 report.content += `<h2>${esc(heading)}</h2>`
                     + `<img data-chart-id="${chartId}" alt="${esc(heading)}" style="max-width:100%;" />`
-                    + `<p><em>${esc(placeholder)}</em></p>`;
+                    + (takeaway
+                        ? `<p>${esc(takeaway)}</p>`
+                        : `<p><em>${esc(placeholder)}</em></p>`);
             } else {
                 // Markdown (pre-edit). Caption can't contain the md-image delimiters.
                 const line = heading.replace(/\n/g, ' ');
                 const caption = line.replace(/[\[\]()]/g, '');
+                const takeawayLine = takeaway?.replace(/\s+/g, ' ');
                 report.content = report.content.replace(/\s*$/, '')
-                    + `\n\n## ${line}\n\n![${caption}](chart://${chartId})\n\n*${placeholder}*\n`;
+                    + `\n\n## ${line}\n\n![${caption}](chart://${chartId})\n\n`
+                    + (takeawayLine ? `${takeawayLine}\n` : `*${placeholder}*\n`);
             }
             if (!report.selectedChartIds.includes(chartId)) report.selectedChartIds.push(chartId);
 
@@ -2031,7 +2106,11 @@ export const dataFormulatorSlice = createSlice({
             report.updatedAt = Date.now();   // drives ReportView's external-refresh effect
 
             if (!state.reportChartAdds) state.reportChartAdds = [];   // pre-feature persisted states
-            state.reportChartAdds.push({ chartId, at: Date.now() });
+            state.reportChartAdds.push({
+                chartId, at: Date.now(),
+                prefilled: !!takeaway,
+                ...(takeaway ? { prefillText: takeaway } : {}),
+            });
         },
         updateGeneratedReportProgress: (state, action: PayloadAction<{ id: string; kind: 'start' | 'end'; label?: string; doneLabel?: string; charts?: { chartType: string; name: string }[] }>) => {
             const { id, kind, label, doneLabel, charts } = action.payload;

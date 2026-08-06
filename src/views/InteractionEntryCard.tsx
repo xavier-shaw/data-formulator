@@ -216,6 +216,28 @@ export function stripFieldMarkers(text: string): string {
     return text.replace(/\*\*([^*]+)\*\*/g, '$1');
 }
 
+/** Render a next-step suggestion label in the shared "action (goal)" shape
+ *  (see analyst/suggestion_guidelines.py): the action part keeps normal text
+ *  color and `**field**` highlighting, while a trailing "(goal)" is dimmed so
+ *  the clickable move reads first and its purpose second. Labels without a
+ *  trailing parenthetical render unchanged — every suggestion surface (the
+ *  suggestion strip, ask_user options) goes through this one renderer. */
+export function renderSuggestionLabel(label: string, accentColor: string): React.ReactNode {
+    const match = label.match(/^(.*\S)\s*(\([^()]+\))$/s);
+    if (!match) {
+        return renderFieldHighlights(label, accentColor);
+    }
+    return (
+        <>
+            {renderFieldHighlights(match[1], accentColor)}
+            {' '}
+            <Box component="span" sx={{ color: 'text.secondary', fontWeight: 400 }}>
+                {renderFieldHighlights(match[2], accentColor)}
+            </Box>
+        </>
+    );
+}
+
 export interface InteractionEntryCardProps {
     entry: InteractionEntry;
     highlighted?: boolean;

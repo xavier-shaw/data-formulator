@@ -104,11 +104,27 @@ conversation in the same turn.
 - each question: `text` (wrap a **column** in `**…**`), `responseType`
   (`single_choice` when offering `options`, else `free_text`), `required`
   (`true` for a clarification the run depends on, `false` for an explanation /
-  optional follow-up), and `options` (plain-text choices, **at most 3** — just
-  the most likely answers; the user can always type a freeform reply, so don't
-  enumerate every case).
+  optional follow-up), and `options` (plain-text choices — for clarification
+  answers keep to the **2–3 most likely**; next-step suggestion sets follow
+  "Suggesting next steps" below. The user can always type a freeform reply,
+  so don't enumerate every case).
 
 This is **terminal**: the run pauses after it and resumes when the user replies.
+
+#### Suggesting next steps
+
+Whenever you offer the user next-step suggestions — because they asked what to
+explore next, or your instructions call for closing a run with suggestions —
+shape them as **one** `ask_user` question: `text` is a short, neutral handoff
+line (≤10 words, e.g. "Where should we take this next?"), `required: false`,
+`responseType: "single_choice"`, and the suggestions are its `options`. The
+user clicks one (or types their own) and the analysis resumes from there.
+
+{suggestion_guidelines}
+
+Unless your instructions say otherwise, "the current focus" is what the latest
+charts in the active thread showed, and "the whole trajectory" is everything
+else in the session — other threads, other tables, angles not yet explored.
 
 ### `delegate` — hand off to a peer agent
 

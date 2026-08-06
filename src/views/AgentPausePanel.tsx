@@ -41,7 +41,7 @@ import {
     ClarificationResponse,
     DelegateTarget,
 } from '../components/ComponentType';
-import { renderFieldHighlights, CompactMarkdown } from './InteractionEntryCard';
+import { renderFieldHighlights, renderSuggestionLabel, CompactMarkdown } from './InteractionEntryCard';
 
 // ---------------------------------------------------------------------------
 // Shared shell
@@ -592,7 +592,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                                                                 '&:hover': { backgroundColor: alpha(accentColor, isSelected ? 0.16 : 0.08) },
                                                             }}
                                                         >
-                                                            {renderFieldHighlights(option.label, accentColor)}
+                                                            {renderSuggestionLabel(option.label, accentColor)}
                                                         </Typography>
                                                     </Box>
                                                 );

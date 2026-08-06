@@ -741,6 +741,11 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
     // + field ids), so it stays through property edits (e.g. sort order) but is
     // dropped once the encoded fields change.
     const titleFresh = !!focusedChart.title && focusedChart.titleKey === computeInsightKey(focusedChart);
+    // Agent caption from the study modes' describe_chart action (executor:
+    // computed data facts; analyst: perceived pattern). Same staleness rule as
+    // the title: hidden once the user edits the chart's encodings.
+    const captionFresh = !!focusedChart.description?.trim()
+        && (!focusedChart.descriptionKey || focusedChart.descriptionKey === computeInsightKey(focusedChart));
     
     const actionBtnSx = {
         padding: '4px',
@@ -862,6 +867,20 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                                         onSpecReady={handleSpecReady}
                                     />
                                 </Box>
+                                {/* Agent caption (describe_chart) — the chart's
+                                    takeaway seed, shown beneath the canvas. */}
+                                {captionFresh && (
+                                    <Typography sx={{
+                                        maxWidth: Math.max(config.defaultChartWidth * 1.4, 480),
+                                        mx: 'auto', mt: 1, px: 2,
+                                        textAlign: 'left',
+                                        fontSize: 13,
+                                        lineHeight: 1.5,
+                                        color: 'text.secondary',
+                                    }}>
+                                        {focusedChart.description!.trim()}
+                                    </Typography>
+                                )}
                                 {/* Quick chart-config controls (toggles/sliders/selects) for
                                     fast in-place tweaks without opening the full encoding
                                     popover. Kept INSIDE the chart-box so it reads as part of

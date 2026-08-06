@@ -311,7 +311,13 @@ def derive_starter_questions_request():
         n = content.get('n', 2)
         language_instruction = get_language_instruction(mode="compact")
         agent = StarterQuestionsAgent(client=client, language_instruction=language_instruction)
-        questions = agent.run(content.get('input_tables', []), primary_table=content.get('primary_table'), n=n)
+        questions = agent.run(
+            content.get('input_tables', []),
+            primary_table=content.get('primary_table'),
+            n=n,
+            focused_thread=content.get('focused_thread'),
+            other_threads=content.get('other_threads'),
+        )
 
         questions = questions if questions is not None else []
         return json_ok({"result": questions})
@@ -376,8 +382,9 @@ def analyst_streaming():
     # Apply the study behavioral profile (standard agent only). Each mode is a
     # markdown file in analyst/modes/ (default.md / executor.md / analyst.md /
     # analyst_guided.md); the server loads it so the experiment stays reproducible
-    # and tamper-resistant. A mode may override max_iterations (Executor 3,
-    # Analyst and Analyst-guided 8; Default leaves the request's value).
+    # and tamper-resistant. A mode may override max_iterations (Executor 5,
+    # Analyst-guided 7 — both budget a describe_chart caption per chart —
+    # Analyst 8; Default leaves the request's value).
     # Default = no profile (the untouched control).
     prompt_profile = None
     if agent_mode != "mini" and analysis_mode in ("executor", "analyst", "analyst_guided"):

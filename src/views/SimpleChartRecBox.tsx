@@ -23,7 +23,8 @@ import {
 } from '@mui/material';
 
 import { useDispatch, useSelector } from 'react-redux';
-import { DataFormulatorState, dfActions, dfSelectors, fetchCodeExpl, fetchFieldSemanticType, generateFreshChart, generateStarterQuestions, GeneratedReport } from '../app/dfSlice';
+import { DataFormulatorState, dfActions, dfSelectors, fetchCodeExpl, fetchFieldSemanticType, generateFreshChart, generateSuggestions, computeSuggestionSignature, GeneratedReport } from '../app/dfSlice';
+import { buildThreadContext as buildThreadContextShared, resolveRootTableId } from '../app/threadContext';
 import { AppDispatch } from '../app/store';
 import { resolveRecommendedChart, getUrls, getTriggers, translateBackend } from '../app/utils';
 import { streamRequest } from '../app/apiClient';
@@ -37,7 +38,7 @@ import { WritingPencil } from '../components/FunComponents';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import AddIcon from '@mui/icons-material/Add';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
-import BoltIcon from '@mui/icons-material/Bolt';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import StopIcon from '@mui/icons-material/Stop';
 
@@ -47,11 +48,7 @@ import { Theme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import { shouldAutoFocusGeneratedChart } from '../app/agentInteractionPolicy';
 import { ClarificationPanel, DelegatePanel, ExplanationPanel } from './AgentPausePanel';
-
-// Bust the per-table starter-suggestion cache when the generation recipe
-// changes (count, phrasing style, prompt) — folded into the signature so
-// stale entries regenerate on next focus.
-const STARTER_RECIPE_VERSION = 'v2';
+import { renderSuggestionLabel } from './InteractionEntryCard';
 
 // Seed prompt used when the user invokes "report" mode (or a report hand-off)
 // without typing an explicit instruction. The unified analyst loads its
@@ -284,26 +281,19 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         setMentionHighlightIdx(0);
     }, [mentionFilter]);
 
-    // ── Starter-questions generation trigger ─────────────────────────
-    // Questions are stored per root table (each table has its own, plus an
-    // optional cross-table question). When a root table is focused and it has
-    // no fresh questions for the current table set, generate them lazily. The
-    // signature (all root table ids) refreshes questions when tables change;
-    // the 500ms debounce collapses batch loads into a single call.
-    const rootTableSignature = React.useMemo(
-        () => rootTables.map(t => t.id).sort().join('|'),
-        [rootTables]
-    );
-    // Freshness key for cached starter suggestions: table set + recipe
-    // version, so a recipe change regenerates without touching the id list
-    // (the thunk still derives tableIds from rootTableSignature).
-    const starterSignature = `${rootTableSignature}#${STARTER_RECIPE_VERSION}`;
-    const focusedRootTableId = (focusedTableId && rootTables.some(t => t.id === focusedTableId))
-        ? focusedTableId
-        : undefined;
+    // ── Suggestion-strip generation trigger (session start / stale set) ──
+    // Suggestions are stored per ROOT table, but the user may be focused on
+    // any derived chart/table under it — resolve the focus to its root so the
+    // strip persists across chart focus changes. When the root has no fresh
+    // set for the current table-set signature, generate lazily (500ms
+    // debounce collapses batch loads). The other two triggers — a charting
+    // run completing, and the ideation button — dispatch the thunk directly
+    // with `force: true`.
+    const starterSignature = computeSuggestionSignature(rootTables);
+    const focusedRootTableId = resolveRootTableId(tables, focusedTableId);
     React.useEffect(() => {
         if (!focusedRootTableId) return;
-        // The Executor condition never renders starter chips (see
+        // The Executor condition never renders the suggestion strip (see
         // showGettingStarted), so skip generation entirely there — no stray
         // LLM call per table load.
         if ((config.studyCondition ?? 'default') === 'executor') return;
@@ -311,14 +301,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         if (entry && entry.signature === starterSignature) return;          // already fresh
         if (starterQuestionsStatus[focusedRootTableId] === 'loading') return; // in flight
         const timer = setTimeout(() => {
-            dispatch(generateStarterQuestions({
-                tableId: focusedRootTableId,
-                signature: starterSignature,
-                tableIds: rootTableSignature.split('|'),
-            }));
+            dispatch(generateSuggestions({ contextTableId: focusedTableId }));
         }, 500);
         return () => clearTimeout(timer);
-    }, [focusedRootTableId, rootTableSignature, starterSignature, starterQuestions, starterQuestionsStatus, config.studyCondition, dispatch]);
+    }, [focusedRootTableId, focusedTableId, starterSignature, starterQuestions, starterQuestionsStatus, config.studyCondition, dispatch]);
 
 
     // Helper: confirm selection of a mention (table only)
@@ -457,125 +443,14 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     }, [pendingClarification, draftNodes]);
 
     // ── Shared structured thread context builder (Tier 2 + Tier 3) ──
-    // Produces the focused/peripheral thread context used by the analyst
-    // (exploreFromChat), so the report has the actual exploration narrative —
-    // user questions, agent thinking, findings — instead of just a flat list
-    // of charts.
+    // Delegates to app/threadContext.ts so the dfSlice suggestions thunk can
+    // build the exact same exploration narrative from fresh store state (this
+    // component's closure goes stale mid-run).
     const buildThreadContext = useCallback((targetTableId: string): {
         focusedThread: any[] | undefined;
         otherThreads: any[] | undefined;
-    } => {
-        // Tier 2: Focused thread — detailed per-step info
-        const focusedSteps: any[] = [];
-        let walkTable = tables.find(t => t.id === targetTableId);
-        const visited = new Set<string>();
-        const focusedChainIds = new Set<string>();
-        while (walkTable?.derive?.trigger) {
-            if (visited.has(walkTable.id)) break;
-            visited.add(walkTable.id);
-            focusedChainIds.add(walkTable.id);
-            const trigger = walkTable.derive.trigger;
-            const interaction = trigger.interaction || [];
-            const userPrompt = interaction.find(e => e.role === 'prompt')?.content;
-            const instruction = interaction.find(e => e.role === 'instruction');
-            const summary = interaction.find(e => e.role === 'summary');
-
-            // Find the actual resolved chart (not the trigger's "Auto" stub)
-            const resolvedChart = charts.find(c => c.tableRef === walkTable!.id && c.source === 'trigger')
-                || charts.find(c => c.tableRef === walkTable!.id);
-            const chartType = resolvedChart?.chartType || '';
-            // Map field IDs to field names for readable context
-            const encodings = resolvedChart?.encodingMap
-                ? Object.fromEntries(
-                    Object.entries(resolvedChart.encodingMap)
-                        .filter(([, v]: [string, any]) => v?.fieldID)
-                        .map(([k, v]: [string, any]) => {
-                            const field = conceptShelfItems.find(f => f.id === v.fieldID);
-                            return [k, field?.name || v.fieldID];
-                        })
-                  )
-                : {};
-
-            const step: any = {
-                table_name: walkTable.virtual?.tableId || walkTable.id,
-                columns: walkTable.names,
-                row_count: walkTable.virtual?.rowCount ?? walkTable.rows.length,
-                user_question: userPrompt || '',
-                agent_thinking: instruction?.plan || '',
-                display_instruction: instruction?.displayContent || instruction?.content || '',
-                chart_type: chartType,
-                encodings,
-                agent_summary: summary?.content || '',
-            };
-
-            focusedSteps.unshift(step);
-
-            walkTable = tables.find(t => t.id === trigger.tableId);
-        }
-        const focusedThread = focusedSteps.length > 0 ? focusedSteps : undefined;
-
-        // Tier 3: Peripheral threads — one-line summary per step
-        // Find all leaf tables (no children or all children are anchored)
-        const leafTables = tables.filter(t => {
-            const children = tables.filter(c => c.derive?.trigger.tableId === t.id);
-            return children.length === 0 || children.every(c => c.anchored);
-        });
-
-        const peripheralThreads: any[] = [];
-        for (const leaf of leafTables) {
-            // Skip the focused thread's leaf
-            if (focusedChainIds.has(leaf.id)) continue;
-            // Skip root/source tables
-            if (!leaf.derive) continue;
-
-            const triggers = getTriggers(leaf, tables);
-            if (triggers.length === 0) continue;
-
-            const STEP_FINDING_CHAR_LIMIT = 200;
-            const steps: string[] = [];
-            for (const trig of triggers) {
-                const instr = trig.interaction?.find((e: InteractionEntry) => e.role === 'instruction');
-                const label = instr?.displayContent || instr?.content || '';
-                // Look up the actual resolved chart from state, not the trigger's "Auto" stub
-                const chartForStep = charts.find(c => c.tableRef === trig.resultTableId && c.source === 'trigger')
-                    || charts.find(c => c.tableRef === trig.resultTableId);
-                const chartType = chartForStep?.chartType || '';
-                const encStr = chartForStep?.encodingMap
-                    ? Object.entries(chartForStep.encodingMap)
-                        .filter(([, v]: [string, any]) => v?.fieldID)
-                        .map(([k, v]: [string, any]) => {
-                            const field = conceptShelfItems.find(f => f.id === v.fieldID);
-                            return `${k}: ${field?.name || v.fieldID}`;
-                        })
-                        .join(', ')
-                    : '';
-                // Per-step agent commentary: the `summary` entry that the
-                // visualize action emits after running this step.
-                let finding = trig.interaction?.find(
-                    (e: InteractionEntry) => e.role === 'summary',
-                )?.content?.trim() || '';
-                if (finding.length > STEP_FINDING_CHAR_LIMIT) {
-                    finding = finding.slice(0, STEP_FINDING_CHAR_LIMIT - 1).trimEnd() + '…';
-                }
-                const head = `${label}${chartType ? ` → ${chartType}` : ''}${encStr ? ` (${encStr})` : ''}`;
-                steps.push(finding ? `${head} — finding: ${finding}` : head);
-            }
-
-            if (steps.length > 0) {
-                const sourceTableId = triggers[0].tableId;
-                const sourceTable = tables.find(t => t.id === sourceTableId);
-                peripheralThreads.push({
-                    source_table: sourceTable?.virtual?.tableId || sourceTableId,
-                    leaf_table: leaf.virtual?.tableId || leaf.id,
-                    step_count: steps.length,
-                    steps,
-                });
-            }
-        }
-        const otherThreads = peripheralThreads.length > 0 ? peripheralThreads : undefined;
-
-        return { focusedThread, otherThreads };
-    }, [tables, charts, conceptShelfItems]);
+    } => buildThreadContextShared(tables, charts, conceptShelfItems, targetTableId),
+    [tables, charts, conceptShelfItems]);
 
     const exploreFromChat = useCallback((prompt: string, clarificationContext?: {
         trajectory: any[];
@@ -589,10 +464,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         // Resolve the study behavioral profile. A resume re-enters the paused
         // run's mode. Otherwise the condition decides typed chat: 'executor'
         // constrains it to executor mode; 'analyst' sends 'analyst_guided'
-        // (anchor on the instruction, extend along it, close every charting
-        // run with next-step suggestions); 'default' sends no analysis_mode,
-        // so typed chat uses the normal agent (the "choosing what to do"
-        // taxonomy).
+        // (carry out the instruction as given, Level-3 pattern captions;
+        // next-step suggestions come from the persistent strip, not the run);
+        // 'default' sends no analysis_mode, so typed chat uses the normal
+        // agent (the "choosing what to do" taxonomy).
         const analysisMode: 'executor' | 'analyst_guided' | undefined =
             clarificationContext?.analysisMode
             ?? (config.studyCondition === 'executor' ? 'executor'
@@ -733,6 +608,11 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         let allNewConcepts: FieldItem[] = [];
         let isCompleted = false;
         let lastCreatedTableId: string | null = isResume ? clarificationContext!.lastCreatedTableId : null;
+        // backend chart_id -> frontend chart id for charts created this run.
+        // Normally identical (the forwarded id is adopted), but on an id
+        // conflict the frontend regenerates — this keeps describe_chart's
+        // caption (keyed by the backend id) attached to the right chart.
+        const backendChartIdMap = new Map<string, string>();
 
         // ── DraftNode tracking ──
         // Local accumulator mirrors the DraftNode's interaction (avoids stale closure reads)
@@ -768,17 +648,16 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 timestamp: Date.now() });
         } else {
             const initialEntries: InteractionEntry[] = [
-                // A clicked starter suggestion is agent-authored, so seed the
-                // interaction with a synthesized agent 'clarify' entry ahead of
-                // the pick. The thread's resolved-Q&A folding then renders the
-                // pair as the same compact conversation card an Analyst
-                // closing-suggestion click gets — an agent proposal the user
-                // ratified, not a user-typed message.
+                // A clicked suggestion is agent-authored, so seed the
+                // interaction with a synthesized agent 'clarify' entry ahead
+                // of the pick. The thread's resolved-Q&A folding then renders
+                // the pair as a compact conversation card — an agent proposal
+                // the user ratified, not a user-typed message.
                 ...(promptOrigin === 'suggestion' ? [{
                     from: 'data-agent', to: 'user', role: 'clarify',
-                    content: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested starting points:' }),
+                    content: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested next steps:' }),
                     clarificationQuestions: [{
-                        text: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested starting points:' }),
+                        text: t('chartRec.starterSuggestionsIntro', { defaultValue: 'Suggested next steps:' }),
                         responseType: 'single_choice',
                         options: (suggestionOptions && suggestionOptions.length > 0 ? suggestionOptions : [prompt])
                             .map(label => ({ label })),
@@ -1167,6 +1046,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                     && !createdCharts.some(c => c.id === forwardedChartId)) {
                     newChart.id = forwardedChartId;
                 }
+                if (forwardedChartId) backendChartIdMap.set(forwardedChartId, newChart.id);
                 // Title comes from the analyst's visualize action (read from the
                 // chart data + spec). Stored on the chart so the canvas renders
                 // it as the chart heading; keyed for staleness on edit.
@@ -1200,6 +1080,29 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                     currentDraftId = null;
                 }
                 createNextDraft(candidateTableId, []);
+            }
+
+            // ── chart_description: study modes' per-chart caption ──
+            // The describe_chart action follows the chart's result event, so
+            // the chart already exists in state. Stored like `title` with a
+            // freshness key (user edits to the encodings hide a stale caption);
+            // rendered under the focused chart and prefilled as the takeaway
+            // when the user adds the chart to their findings report.
+            if (result.type === "chart_description") {
+                const targetChartId = backendChartIdMap.get(result.chart_id) ?? result.chart_id;
+                const describedChart = [...createdCharts, ...charts].find(c => c.id === targetChartId);
+                const captionText = typeof result.description === 'string' ? result.description.trim() : '';
+                if (describedChart && captionText) {
+                    dispatch(dfActions.setChartDescription({
+                        chartId: describedChart.id,
+                        description: captionText,
+                        descriptionKey: computeInsightKey(describedChart),
+                    }));
+                    thinkingSteps.push('✓ ' + t('dataThread.captionedChart'));
+                    if (currentDraftId) {
+                        dispatch(dfActions.updateDraftRunningPlan({ draftId: currentDraftId, plan: thinkingSteps.join(STEP_SEP) }));
+                    }
+                }
             }
 
             // ── clarify / explain: pause and let user respond ──
@@ -1343,6 +1246,14 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 const summary = result.status === "max_iterations"
                     ? translateBackend(rawSummary, result.content?.summary_code) || t('chartRec.maxIterationsReached')
                     : rawSummary;
+                // Refresh the persistent suggestion strip when the run created
+                // a chart: the thread just changed, so regenerate next-step
+                // suggestions grounded in it. The thunk reads FRESH store
+                // state (this closure's `tables` predates the run) and no-ops
+                // for the executor condition.
+                if (lastCreatedTableId && (config.studyCondition ?? 'default') !== 'executor') {
+                    dispatch(generateSuggestions({ contextTableId: lastCreatedTableId, force: true }));
+                }
                 // Finalize any report streamed during this run. A report is an
                 // artifact that OWNS its closing summary: it anchors to the
                 // newest table created this run, or falls back to the focused
@@ -1951,11 +1862,11 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         style={{ display: 'none' }}
                         onChange={(e) => { handleAttachFiles(e.target.files); if (e.target) e.target.value = ''; }}
                     />
-                    {/* The attach / report / get-ideas buttons belong to the
-                        unmodified Default condition. Both study conditions
-                        (Executor, Analyst) hide them to keep the participant's
-                        surface minimal — typed instructions (and, in Analyst,
-                        the agent's closing suggestions) drive the agent. */}
+                    {/* The attach / report buttons belong to the unmodified
+                        Default condition; both study conditions hide them to
+                        keep the participant's surface minimal. The get-ideas
+                        (suggestion-strip refresh) button is shown in Default
+                        AND Analyst — only Executor excludes agent ideation. */}
                     {(config.studyCondition ?? 'default') === 'default' && (
                         <Tooltip title={t('chartRec.attachContext', { defaultValue: 'Attach context (image or file)' })}>
                             <IconButton
@@ -1978,8 +1889,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                     <CircularProgress size={18} sx={{ m: 0.5 }} />
                 ) : (
                     <>
-                        {/* Report + Get-Ideas: Default condition only (hidden in
-                            both study conditions). */}
+                        {/* Report: Default condition only (participants author
+                            their own findings report in the study conditions). */}
                         {(config.studyCondition ?? 'default') === 'default' && (
                             <Tooltip title={t('chartRec.generateReport')}>
                                 <span>
@@ -1995,7 +1906,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                 </span>
                             </Tooltip>
                         )}
-                        {(config.studyCondition ?? 'default') === 'default' && (
+                        {/* Ideation: refresh the persistent suggestion strip
+                            (one-shot suggestions agent — not an analyst run).
+                            Default + Analyst; Executor never gets suggestions. */}
+                        {(config.studyCondition ?? 'default') !== 'executor' && (
                             <Tooltip title={t('chartRec.getIdeaSuggestions')}>
                                 <span>
                                     <IconButton
@@ -2003,7 +1917,10 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                         sx={{ p: 0.5, color: theme.palette.primary.main }}
                                         aria-label={t('chartRec.getIdeaSuggestions')}
                                         disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
-                                        onClick={() => submitChat(t('chartRec.exploreIdeasPrompt'), undefined, t('chartRec.askedForRecommendations'))}
+                                        onClick={() => {
+                                            setStarterCollapsed(false);
+                                            dispatch(generateSuggestions({ contextTableId: focusedTableId, force: true }));
+                                        }}
                                     >
                                         <TipsAndUpdatesIcon sx={{ fontSize: 18 }} />
                                     </IconButton>
@@ -2100,59 +2017,63 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         </Card>
     );
 
-    // ── Getting-started guidance ─────────────────────────────────────
-    // When a root table is focused, show a muted row of AI-generated starter
-    // questions tailored to that table (see the trigger effect above — each
-    // table has its own set, plus an optional cross-table question). Clicking
-    // a chip runs it; clicking the lightning bolt collapses/expands the row.
+    // ── Persistent next-step suggestion strip ────────────────────────
+    // One cached suggestion set per ROOT table (the focused chart/table is
+    // resolved to its root, so the strip persists across chart focus changes
+    // within a thread). Refreshed on session start (stale signature), on
+    // charting-run completion, and via the ideation button. Clicking a chip
+    // runs it; the "What to explore next" header row toggles collapse.
     const focusedStarterEntry = focusedRootTableId ? starterQuestions[focusedRootTableId] : undefined;
     const focusedStarterStatus = focusedRootTableId ? starterQuestionsStatus[focusedRootTableId] : undefined;
     const focusedStarterFresh = !!focusedStarterEntry && focusedStarterEntry.signature === starterSignature;
     const starterLoading = !!focusedRootTableId && (!focusedStarterFresh || focusedStarterStatus === 'loading');
 
-    // Starter chips are agent-authored analytical prompts. They fit Default
-    // and the agent-driven Analyst condition (the agent proposing directions
-    // is that condition's point), but Executor hides them — there the user
-    // makes every analytical decision, so agent ideation must not leak in.
+    // Suggestions are agent-authored analytical prompts. They fit Default
+    // and the agent-supported Analyst condition (the agent proposing
+    // directions is that condition's point), but Executor hides them — there
+    // the user makes every analytical decision, so agent ideation must not
+    // leak in.
     const showGettingStarted = (config.studyCondition ?? 'default') !== 'executor'
         && !!focusedRootTableId
         && !isChatFormulating
         && !pendingClarification
         && (starterLoading || (focusedStarterEntry?.questions?.length ?? 0) > 0);
 
-    // Vertical stack of starter suggestions, styled after the clarification
-    // panel's option buttons so they read as the same kind of affordance the
-    // Analyst closing suggestions use.
+    // Vertical stack of suggestions, styled after the clarification panel's
+    // option buttons so both suggestion surfaces read as the same affordance.
     const gettingStartedBlock = showGettingStarted ? (
-        <Box sx={{ mx: 1, mb: 0.75, px: 0.5, display: 'flex', alignItems: 'flex-start', gap: 0.25, overflow: 'hidden' }}>
+        <Box sx={{ mx: 1, mb: 0.75, px: 0.5, display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
+            {/* Header: icon + "What to explore next" label so the chips read
+                as next-step suggestions. The whole row toggles collapse. */}
             <Tooltip title={t(starterCollapsed ? 'chartRec.expandStarters' : 'chartRec.collapseStarters', { defaultValue: starterCollapsed ? 'Show suggestions' : 'Hide suggestions' })}>
-                <IconButton
-                    size="small"
+                <Box
                     onClick={() => setStarterCollapsed(c => !c)}
                     sx={{
-                        flexShrink: 0,
-                        p: 0.5, borderRadius: '6px', color: 'text.disabled',
+                        display: 'flex', alignItems: 'center', gap: 0.5,
+                        alignSelf: 'flex-start',
+                        px: 0.5, py: '2px', borderRadius: '6px',
+                        cursor: 'pointer', userSelect: 'none',
+                        color: 'text.secondary',
                         transition: 'background-color 0.15s, color 0.15s',
-                        '&:hover': { color: 'text.secondary', backgroundColor: alpha(theme.palette.text.primary, 0.06) },
+                        '&:hover': { color: 'text.primary', backgroundColor: alpha(theme.palette.text.primary, 0.06) },
                     }}
                 >
-                    <BoltIcon sx={{ fontSize: 16 }} />
-                </IconButton>
+                    <TipsAndUpdatesIcon sx={{ fontSize: 14, color: theme.palette.primary.main }} />
+                    <Typography sx={{ fontSize: 11, fontWeight: 500, color: 'inherit', lineHeight: 1 }}>
+                        {t('chartRec.whatToExploreNext', { defaultValue: 'What to explore next' })}
+                    </Typography>
+                    <ExpandMoreIcon sx={{
+                        fontSize: 14, color: 'text.disabled',
+                        transform: starterCollapsed ? 'rotate(-90deg)' : 'none',
+                        transition: 'transform 0.15s',
+                    }} />
+                </Box>
             </Tooltip>
-            {starterCollapsed && (
-                <Typography
-                    onClick={() => setStarterCollapsed(false)}
-                    sx={{ fontSize: 11, color: 'text.disabled', cursor: 'pointer', mt: '5px', '&:hover': { color: 'text.secondary' } }}
-                >
-                    {t('chartRec.expandStarters', { defaultValue: 'Show suggestions' })}
-                </Typography>
-            )}
             <Collapse
                 in={!starterCollapsed}
                 timeout={200}
                 sx={{
                     minWidth: 0,
-                    flex: 1,
                     '& .MuiCollapse-wrapperInner': { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '4px', minWidth: 0 },
                 }}
             >
@@ -2185,7 +2106,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                 '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.08), borderColor: alpha(theme.palette.primary.main, 0.4) },
                             }}
                         >
-                            {q}
+                            {renderSuggestionLabel(q, theme.palette.primary.main)}
                         </Typography>
                     ))
                 }

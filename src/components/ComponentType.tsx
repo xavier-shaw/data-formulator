@@ -410,6 +410,11 @@ export type Chart = {
     config?: Record<string, any>,  // additional chart properties defined by the chart template
     title?: string,  // AI-generated chart title (from the analyst's visualize action)
     titleKey?: string,  // "chartType|sortedFieldIds" snapshot when title was set; used to detect staleness
+    // Agent caption from the study modes' describe_chart action (executor:
+    // computed Level-2 data facts; analyst: Level-3 perceived pattern). Shown
+    // under the focused chart and prefilled as the takeaway on add-to-report.
+    description?: string,
+    descriptionKey?: string,  // same staleness snapshot as titleKey, for the caption
     styleVariants?: ChartStyleVariant[],  // user-authored style refinements (see ChartStyleVariant)
     activeVariantId?: string,  // id of the variant currently rendered in the focused canvas; undefined = default
     scaleFactor?: number,  // zoom level applied by the resizer; undefined = 1 (no zoom)

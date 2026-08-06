@@ -36,7 +36,7 @@ import { DataFormulatorState, dfActions, dfSelectors, SSEMessage, GeneratedRepor
 import { getTriggers, getUrls, fetchWithIdentity } from '../app/utils';
 import { apiRequest } from '../app/apiClient';
 import { extractErrorMessage } from '../app/errorHandler';
-import { Chart, DictTable, Trigger, InteractionEntry } from "../components/ComponentType";
+import { Chart, DictTable, Trigger, InteractionEntry, computeInsightKey } from "../components/ComponentType";
 import { CATALOG_TABLE_ITEM } from '../components/DndTypes';
 import type { CatalogTableDragItem } from '../components/DndTypes';
 import { loadTable } from '../app/tableThunks';
@@ -3163,11 +3163,16 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                         dispatch(dfActions.ensureFindingsReport({ title: t('report.myFindingsTitle') }));
                         const heading = chart.title?.trim()
                             || t('report.chartNumberFallback', { number: (findingsReport?.selectedChartIds.length ?? 0) + 1 });
+                        // Agent caption (describe_chart) seeds the takeaway when
+                        // still fresh (same staleness rule as the title).
+                        const captionFresh = !!chart.description?.trim()
+                            && (!chart.descriptionKey || chart.descriptionKey === computeInsightKey(chart));
                         dispatch(dfActions.addChartToReport({
                             reportId: FINDINGS_REPORT_ID,
                             chartId: chart.id,
                             heading,
                             placeholder: t('report.takeawayPlaceholder'),
+                            ...(captionFresh ? { takeaway: chart.description!.trim() } : {}),
                         }));
                         dispatch(dfActions.setFocused({ type: 'report', reportId: FINDINGS_REPORT_ID }));
                     },

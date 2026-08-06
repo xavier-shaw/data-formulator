@@ -5,6 +5,7 @@ import json
 from data_formulator.agent_config import reasoning_effort_for
 from data_formulator.agents.agent_utils import extract_json_objects
 from data_formulator.agents.agent_language import inject_language_instruction
+from data_formulator.analyst.suggestion_guidelines import SUGGESTION_GUIDELINES
 
 import logging
 
@@ -13,23 +14,32 @@ logger = logging.getLogger(__name__)
 _AGENT_ID = "starter_questions"
 
 
-SYSTEM_PROMPT = '''You are a data analyst helping a user get started exploring a freshly loaded dataset.
+SYSTEM_PROMPT = '''You are a data analyst proposing next-step suggestions: concrete analysis moves the user could take next on their data.
 You are given a summary of the available tables (their names, columns, and a few sample rows) and one designated "primary_table".
-Propose starter suggestions: concrete first analysis moves the user could take on this data.
+Once analysis is underway, you are also given the exploration so far: "focused_thread" — the charting steps taken on the current thread (each with its instruction, chart type, encodings, and finding), earliest first — and "other_threads", one-line summaries of the other exploration threads.
+Propose suggestions following the shared guidelines below.
 
-Guidelines:
-- Center the suggestions on the primary_table (its own columns / trends / comparisons / distributions / breakdowns).
-- If other tables are present and share a plausible key with the primary table, you MAY include ONE cross-table suggestion that relates the primary table to another table.
-- Each suggestion is a chart-producing instruction in the user's voice, executable as-is: name the data and the operation (e.g. "Break daily sales down by region").
-- Keep each suggestion to 8 words or fewer. Phrase it as an analysis move to take, never as a claim about what the data shows.
-- Use readable field wording rather than raw column identifiers (say "CO2 emissions", not "Value_co2_emissions_kt_by_country"), but only reference fields that exist.
-- Make the set meaningfully distinct — each suggestion opens a different angle (e.g. a trend over time, a comparison across categories, a distribution or breakdown), so together they cover different first moves.
-- Do NOT include a generic "show high-level trends" suggestion — that one is already provided separately.
+''' + SUGGESTION_GUIDELINES + '''
+
+Grounding the two ranges:
+- With a "focused_thread" (analysis underway): **near moves** ground in its
+  latest charting steps — drill into a detail they surfaced, try a statistical
+  technique on the same data, or pivot to a different angle on it. **Far
+  moves** ground in the whole trajectory — other threads, other tables, angles
+  the exploration has not touched yet.
+- Fresh session (no "focused_thread"): **near moves** ground in the
+  primary_table — a trend, a comparison, a distribution or breakdown, or a
+  statistical cut of its own columns. **Far moves** broaden beyond it: relate
+  the primary table to another table that shares a plausible key (at most ONE
+  cross-table suggestion), or zoom out to a whole-table overview. With a
+  single table, a far move is a table-level overview cut.
+- Never repeat a charting step already listed in "focused_thread" or
+  "other_threads".
 
 Return ONLY a json object of the following form:
 
 {
-    "questions": ["<suggestion 1>", "<suggestion 2>", "<suggestion 3>"]
+    "questions": ["<action (goal)>", "<action (goal)>", ...]
 }
 
 Example:
@@ -53,7 +63,7 @@ Example:
 [OUTPUT]
 
 {
-    "questions": ["Compare revenue across regions", "Show monthly revenue trends by product", "Rank products by units sold"]
+    "questions": ["Compare revenue across regions (see which region leads)", "Rank products by units sold (find the volume drivers)", "Chart monthly total revenue (see the overall trajectory)", "Break revenue down by product and region (spot region-product niches)"]
 }
 '''
 
@@ -64,16 +74,24 @@ class StarterQuestionsAgent(object):
         self.client = client
         self.language_instruction = language_instruction
 
-    def run(self, tables, primary_table=None, n=2):
-        """Generate a short list of starter exploration questions.
+    def run(self, tables, primary_table=None, n=2, focused_thread=None, other_threads=None):
+        """Generate a short list of next-step suggestions.
 
         ``tables`` is a list of dicts with ``name``, optional ``description``
         and either ``columns`` and/or ``sample_rows``. ``primary_table`` is
-        the name of the table the questions should center on. Returns a list
-        of question strings (best effort, may be empty on failure).
+        the name of the table the suggestions should center on. Optional
+        ``focused_thread`` / ``other_threads`` carry the exploration so far
+        (same Tier-2/Tier-3 shapes the analyst agent receives) so near moves
+        ground in the latest charts; omitted on a fresh session, where the
+        prompt falls back to starter grounding. Returns a list of suggestion
+        strings (best effort, may be empty on failure).
         """
 
         input_obj = {"primary_table": primary_table, "tables": tables, "num_questions": n}
+        if focused_thread:
+            input_obj["focused_thread"] = focused_thread
+        if other_threads:
+            input_obj["other_threads"] = other_threads
 
         user_query = f"[INPUT]\n\n{json.dumps(input_obj, ensure_ascii=False, default=str)}\n\n[OUTPUT]"
 
