@@ -15,6 +15,11 @@ import * as path from 'path';
 const [outDir, htmlPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf-8'));
 
+// Refuse to build a gallery from an unguarded manifest — the whole point of
+// the drop report is that it is present and honest.
+if (!manifest.charts?.length) throw new Error('manifest has no charts');
+if (!manifest.drops) throw new Error('manifest predates the render-identity guard; re-run main.ts');
+
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const svgOf = (file) => {
     const raw = fs.readFileSync(path.join(outDir, 'svg', file.replace('.vl.json', '.svg')), 'utf-8')
@@ -34,7 +39,7 @@ const METHOD_INFO = {
     'graphscape': {
         name: 'GraphScape walks',
         short: 'controlled edit distance',
-        desc: 'Atomic spec edits (sort flip, transpose, mark change, field replacement) composed to hit near / mid / far distance bands, with GraphScape-ordered costs. The workhorse for the misrecall-distance analysis.',
+        desc: 'Atomic spec edits (re-sort, transpose, mark change, field replacement) composed to hit near / mid / far distance bands, with GraphScape-ordered costs. The workhorse for the misrecall-distance analysis. Sort is applied to the <i>category</i> channel — on the measure channel it compiles to a sort of a quantitative scale and never changes the render.',
     },
     'data-perturb': {
         name: 'Data perturbation',
@@ -102,15 +107,20 @@ function card(c, d) {
     const more = (d.edits?.length ?? 0) > 4 ? `<li class="more">… ${d.edits.length - 4} more</li>` : '';
     const dataNote = d.dataEditNote ? `<li><span class="op">DATA</span> ${esc(d.dataEditNote)}</li>` : '';
     const caveat = d.caveat ? `<p class="caveat" title="${esc(d.caveat)}">seen-both caveat — needs “final version?” phrasing</p>` : '';
+    const order = d.dataDetail?.order
+        ? `<span title="Kendall-tau distance of the displayed row order, read off the compiled spec">order <b>${fmt(d.dataDetail.order)}</b></span>` : '';
+    const also = (d.alsoFoundBy ?? []).length
+        ? `<p class="also">also reached by ${d.alsoFoundBy.map(a => `<span class="mchip m-${a.method}">${METHOD_INFO[a.method].name}</span>`).join(' ')}</p>` : '';
     return `<figure class="card m-${d.method}" id="card-${d.id}" data-method="${d.method}" data-chart="${c.id}"
   data-spec="${d.specDist}" data-data="${d.dataDist}" data-label="${esc(d.label)}">
   <div class="chartbox">${svgOf(d.specFile)}</div>
   <figcaption>
-    <p class="cardtitle"><span class="mchip m-${d.method}">${METHOD_INFO[d.method].name}</span> ${esc(d.label)}</p>
+    <p class="cardtitle">${esc(d.label)}</p>
     <p class="dist"><span title="GraphScape-style edit cost vs the original">spec <b>${fmt(d.specDist)}</b></span>
-       <span title="rank / magnitude / label change of plotted values">data <b>${fmt(d.dataDist)}</b></span></p>
+       <span title="rank / magnitude / label change of plotted values">data <b>${fmt(d.dataDist)}</b></span>${order}</p>
     <ul class="edits">${edits}${more}${dataNote}</ul>
     <p class="why">${esc(d.rationale)}</p>
+    ${also}
     ${caveat}
   </figcaption>
 </figure>`;
@@ -273,7 +283,18 @@ h1, h2, h3 { font-family: "Avenir Next", "Seravek", -apple-system, "Segoe UI", s
   min-height: 150px; overflow: hidden; }
 .chartbox svg, .chartbox img { max-width: 100%; height: auto; max-height: 240px; }
 .cardtitle { font-size: 12.5px; margin: 8px 0 2px; line-height: 1.35; }
-.mchip { display: none; }
+.mchip { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--mc); border: 1px solid var(--mc); border-radius: 3px; padding: 0 4px; }
+.also { font-size: 11px; color: var(--ink-3); margin: 6px 0 0; }
+.guard { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; margin: 0 0 26px; }
+.guard h2 { margin: 0 0 4px; font-size: 17px; }
+.guard p { color: var(--ink-2); font-size: 13.5px; max-width: 92ch; margin: 2px 0 12px; }
+.guard table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.guard th { text-align: left; color: var(--ink-3); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); }
+.guard td { padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.guard td b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.guardwrap { overflow-x: auto; }
 .dist { font-size: 12px; color: var(--ink-2); margin: 0 0 4px; display: flex; gap: 12px; }
 .dist b { color: var(--ink); }
 .edits { list-style: none; margin: 0; padding: 0; font-size: 11px; color: var(--ink-2); }
@@ -327,6 +348,28 @@ ${METHOD_ORDER.map(m => `<div class="mcard m-${m}">
 </div>`).join('\n')}
 </div>
 
+<div class="guard">
+  <h2>Render-identity guard</h2>
+  <p>A lure that renders <i>pixel-identical</i> to the original is a broken quiz item — the participant
+  would be shown two correct answers. Spec-level identity does not catch these (a “Bar Chart” and a
+  “Stacked Bar Chart” with no color channel are different specs that render the same), so every candidate
+  is rendered and hashed, and anything matching the original — or a lure already kept — is dropped.
+  The build fails if any survive. This table is what the guard removed on this run.</p>
+  <div class="guardwrap"><table>
+    <thead><tr><th>Reason</th><th>Dropped</th><th>What it was</th></tr></thead>
+    <tbody>
+      <tr><td>identical to original</td><td><b>${manifest.dropSummary?.['identical-to-original'] ?? 0}</b></td>
+        <td>degenerate edits — e.g. perturbing a measure that is all zeros, or a mark swap the compiler collapses back</td></tr>
+      <tr><td>duplicate of a kept lure</td><td><b>${manifest.dropSummary?.['duplicate-of-kept-lure'] ?? 0}</b></td>
+        <td>two methods reaching the same chart; first keeps it, the other is recorded as “also reached by”</td></tr>
+      <tr><td>degenerate render</td><td><b>${manifest.dropSummary?.['degenerate-render'] ?? 0}</b></td>
+        <td>chart drew <code>NaN</code>/<code>undefined</code> labels — visibly broken, so a participant could eliminate it on sight and inflate accuracy</td></tr>
+      ${manifest.dropSummary?.['render-failed'] ? `<tr><td>render failed</td><td><b>${manifest.dropSummary['render-failed']}</b></td><td>candidate did not survive Vega-Lite rendering</td></tr>` : ''}
+      ${manifest.dropSummary?.['compile-failed'] ? `<tr><td>compile failed</td><td><b>${manifest.dropSummary['compile-failed']}</b></td><td>candidate did not compile to a valid spec</td></tr>` : ''}
+    </tbody>
+  </table></div>
+</div>
+
 <div class="overview">
   <h2>Distance map — what each method probes</h2>
   <p class="cap">Each dot is one distractor, positioned by its distance from the original chart.
@@ -359,6 +402,15 @@ ${manifest.charts.map(section).join('\n')}
   A production QuizGenAgent can author further <i>semantically plausible</i> lures as Flint specs directly
   (e.g. “confuse the rate with the count”) — the sibling-measure and session-hybrid methods are the
   deterministic core of that idea.</p>
+  <h2>Order is a spec property, not a data property</h2>
+  <p>A re-sorted lure changes no values, so <code>dataDistance</code> — which keys rows by category —
+  scores it 0, and a spec diff recovers nothing because the rows are untouched. Left alone it would land at
+  <code>(0, 0)</code>: the coordinate that means “identical”, which would quietly delete every order-based
+  misrecall from the analysis. Two fixes: generators <i>declare</i> edits a diff cannot recover (so a re-sort
+  costs 0.5 on the spec axis, matching GraphScape's treatment of sort), and the reported
+  <code>order</code> figure is a Kendall-tau distance computed from the <i>compiled</i> spec — the only place
+  the displayed sequence is knowable, since a Bar Table re-sorts into an explicit domain array no matter what
+  order its rows arrive in.</p>
   <h2>Distances</h2>
   <p><b>Spec distance</b> sums GraphScape-ordered edit costs recovered by diffing lure vs original:
   sort flip 0.5 · within-family mark swap 1.0 · transpose 1.0 · channel move 1.2 · add/remove encoding 1.4 ·

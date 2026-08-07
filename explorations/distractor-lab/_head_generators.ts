@@ -24,7 +24,6 @@ import {
     ChartLevelSpec, FieldMeta, SessionChart, SessionData,
     cloneSpec, compiles, isQuantitative, specSignature,
 } from './lib';
-import { SpecEdit, EDIT_COSTS } from './distance';
 import { vlAdaptChart, vlRecommendEncodings } from '../../src/lib/agents-chart';
 
 export type Method = 'enumeration' | 'graphscape' | 'data-perturb' | 'sibling-measure' | 'session-hybrid';
@@ -40,12 +39,6 @@ export interface DistractorCandidate {
     dataEditNote?: string;
     /** flags a lure that needs special quiz phrasing (e.g. participant saw both) */
     caveat?: string;
-    /**
-     * Edits a spec diff cannot recover (see distance.ts mergeEdits).
-     * Without these, order-only lures score (0, 0) — indistinguishable from
-     * the original in the analysis.
-     */
-    declaredEdits?: SpecEdit[];
 }
 
 // ── shared helpers ───────────────────────────────────────────────────────
@@ -170,11 +163,11 @@ export function genGraphscape(chart: SessionChart): DistractorCandidate[] {
     const roles = chartRoles(chart);
     const semTypes = semanticTypeMap(chart.metadata);
 
-    const push = (spec: ChartLevelSpec, label: string, rationale: string, declaredEdits?: SpecEdit[]) => {
+    const push = (spec: ChartLevelSpec, label: string, rationale: string) => {
         const sig = specSignature(spec);
         if (seen.has(sig) || !compiles(spec, chart.rows, chart.metadata)) return;
         seen.add(sig);
-        out.push({ method: 'graphscape', label, rationale, spec, rows: chart.rows, metadata: chart.metadata, declaredEdits });
+        out.push({ method: 'graphscape', label, rationale, spec, rows: chart.rows, metadata: chart.metadata });
     };
 
     const markChange = (target: string): ChartLevelSpec | undefined => {
@@ -186,35 +179,17 @@ export function genGraphscape(chart: SessionChart): DistractorCandidate[] {
     };
 
     // NEAR (≈1 edit, cheap): sort flip, near-family mark change, transpose
-    //
-    // Sort must go on the CATEGORY channel. Probed against the real compiler:
-    //   • sortOrder on the *measure* channel compiles to a sort on a
-    //     quantitative scale — the compiled spec changes but the render never
-    //     does. (This shipped as a no-op on all 13 charts before it was caught.)
-    //   • "Bar Table" ignores sortOrder on *every* channel: its template
-    //     hard-computes an explicit domain array from the data, so sort flip is
-    //     not expressible at the semantic level there at all.
-    // The render-identity guard in main.ts is the backstop either way.
-    if (roles.categoryCh && chart.spec.chartType !== 'Bar Table') {
-        for (const dir of ['ascending', 'descending'] as const) {
-            if (chart.spec.encodings[roles.categoryCh]?.sortOrder === dir) continue;
-            const s = cloneSpec(chart.spec);
-            s.encodings[roles.categoryCh].sortOrder = dir;
-            push(s, `sorted ${dir}`,
-                `Same fields and values, rows re-ordered ${dir} along the ${roles.category} axis — do they remember the arrangement, or only the content?`,
-                [{ op: 'SORT', detail: `${roles.categoryCh}: default → ${dir}`, cost: EDIT_COSTS.SORT_FLIP }]);
-        }
+    if (roles.measureCh) {
+        const s = cloneSpec(chart.spec);
+        const cur = s.encodings[roles.measureCh].sortOrder;
+        s.encodings[roles.measureCh].sortOrder = cur === 'ascending' ? 'descending' : 'ascending';
+        push(s, 'sort flipped', 'Same chart, opposite sort — was the largest at the top or bottom?');
     }
     for (const t of NEAR_MARKS[chart.spec.chartType] ?? []) {
         const s = markChange(t);
         if (s) push(s, `mark → ${t}`, `Same data and fields, near-family mark swap (${chart.spec.chartType} → ${t}).`);
     }
-    // Transpose is meaningless for a Bar Table: its two channels are a label
-    // column and a bar column, not interchangeable axes. Swapping them puts the
-    // measure in the label slot and the category in the bar slot, which renders
-    // a column of NaN. (The plausibility guard in main.ts would drop it anyway.)
-    if (chart.spec.encodings.x?.field && chart.spec.encodings.y?.field
-        && chart.spec.chartType !== 'Bar Table') {
+    if (chart.spec.encodings.x?.field && chart.spec.encodings.y?.field) {
         const s = cloneSpec(chart.spec);
         const tmp = s.encodings.x; s.encodings.x = s.encodings.y; s.encodings.y = tmp;
         push(s, 'transposed', 'Axes swapped — vertical vs horizontal orientation memory.');

@@ -79,6 +79,25 @@ export function markTransitionCost(a: string, b: string): number {
 export interface SpecEdit { op: string; detail: string; cost: number }
 
 /**
+ * Merge generator-DECLARED edits with diff-recovered ones.
+ *
+ * Some edits are invisible to a spec diff — a sort flip expressed on the
+ * category channel changes the *rendered order* but the two chart-level
+ * specs can differ only in a field a naive diff already accounts for, and a
+ * row-order change is not a chart-level property at all. Those lures would
+ * score (spec 0, data 0), i.e. the exact coordinate that means "identical" —
+ * which would silently drop real misrecall events out of the analysis.
+ *
+ * So generators may declare edits at construction time; declared edits win
+ * over a diffed edit of the same op, and are unioned with the rest.
+ */
+export function mergeEdits(declared: SpecEdit[] | undefined, diffed: SpecEdit[]): SpecEdit[] {
+    if (!declared || declared.length === 0) return diffed;
+    const declaredOps = new Set(declared.map(e => e.op));
+    return [...declared, ...diffed.filter(e => !declaredOps.has(e.op))];
+}
+
+/**
  * Diff two chart-level specs into an approximate GraphScape edit list.
  * Handles: mark change, transpose (x/y swap counted once), channel moves,
  * field replacement, add/remove encoding, sort + aggregate changes.
@@ -191,8 +210,68 @@ export interface DataDistance {
     magnitude: number;
     /** 1 - Jaccard overlap of category label sets */
     label: number;
-    /** headline number: max of components (a lure is only as "same" as its most-changed aspect) */
+    /**
+     * Normalized Kendall-tau distance of the *displayed* row sequence.
+     * Filled in by the caller via `displayedOrder()` on the compiled specs —
+     * `dataDistance` alone cannot see it, since a sort lure changes no rows.
+     * Reported for diagnostics only, deliberately NOT folded into `overall`:
+     * presentation order is a spec property (GraphScape counts sort as a spec
+     * edit), so a sort flip must move the lure along the spec axis, not data.
+     */
+    order: number;
+    /** headline number: max of the VALUE components (a lure is only as "same" as its most-changed aspect) */
     overall: number;
+}
+
+/**
+ * The order the viewer actually sees, read off the COMPILED spec.
+ *
+ * Row order in the data is not the displayed order: a sort lure leaves rows
+ * untouched and reorders at render time via the spec's sort directive, and a
+ * Bar Table always re-sorts into an explicit domain array regardless of rows.
+ * Reading the compiled spec is the only way to compare what was on screen.
+ */
+export function displayedOrder(vl: any, categoryField: string | undefined, rows: any[]): string[] {
+    if (!categoryField) return [];
+    const dataOrder = () => rows.map(r => String(r[categoryField]));
+
+    // Find the sort directive on whichever channel encodes the category field.
+    let sort: any;
+    const unescape = (s: string) => String(s).replace(/\\/g, '');
+    const walk = (o: any): void => {
+        if (!o || typeof o !== 'object' || sort !== undefined) return;
+        if (typeof o.field === 'string' && unescape(o.field) === categoryField && 'sort' in o && o.sort != null) {
+            sort = o.sort;
+            return;
+        }
+        for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v);
+    };
+    walk(vl);
+
+    if (Array.isArray(sort)) return sort.map(String);
+    if (sort === 'ascending') return [...new Set(dataOrder())].sort();
+    if (sort === 'descending') return [...new Set(dataOrder())].sort().reverse();
+    if (sort && typeof sort === 'object' && typeof sort.field === 'string') {
+        const by = unescape(sort.field);
+        const dir = sort.order === 'descending' ? -1 : 1;
+        return [...rows]
+            .sort((a, b) => dir * (Number(a[by]) - Number(b[by])))
+            .map(r => String(r[categoryField]));
+    }
+    return dataOrder();
+}
+
+/** Normalized Kendall-tau distance between two orderings of the same key set. */
+export function kendallTauDistance(a: string[], b: string[]): number {
+    const pos = new Map(b.map((k, i) => [k, i]));
+    const seq = a.map(k => pos.get(k)).filter((v): v is number => v !== undefined);
+    const n = seq.length;
+    if (n < 2) return 0;
+    let inversions = 0;
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) if (seq[i] > seq[j]) inversions++;
+    }
+    return inversions / ((n * (n - 1)) / 2);
 }
 
 /**
@@ -205,7 +284,7 @@ export function dataDistance(
     categoryField: string | undefined,
     measureField: string | undefined,
 ): DataDistance {
-    const zero: DataDistance = { rank: 0, magnitude: 0, label: 0, overall: 0 };
+    const zero: DataDistance = { rank: 0, magnitude: 0, label: 0, order: 0, overall: 0 };
     if (!measureField) return zero;
 
     const key = (r: any, i: number) => categoryField ? String(r[categoryField]) : String(i);
@@ -228,7 +307,14 @@ export function dataDistance(
         magnitude = Math.min(1, rmse / range);
     }
 
+    // Row-order fallback; the caller overwrites this with the compiled-spec
+    // display order, which is what the participant actually saw.
+    const order = kendallTauDistance(
+        origRows.map((r, i) => key(r, i)),
+        varRows.map((r, i) => key(r, i)),
+    );
+
     const overall = Math.max(rank, magnitude, label);
     const r2 = (x: number) => +x.toFixed(3);
-    return { rank: r2(rank), magnitude: r2(magnitude), label: r2(label), overall: r2(overall) };
+    return { rank: r2(rank), magnitude: r2(magnitude), label: r2(label), order: r2(order), overall: r2(overall) };
 }

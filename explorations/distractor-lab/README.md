@@ -10,38 +10,65 @@ the surrounding quiz-module plan.
 ## Pipeline
 
 ```
-state.json ──▶ main.ts ──▶ out/specs/*.vl.json ──▶ vl2svg ──▶ out/svg/*.svg
- (session)     (extract +      (compiled via            (headless render)
-                generate +      assembleVegaLite,
-                score)          the app's own pipeline)
-                                        │
-                                        ▼
-                     build_gallery.mjs ──▶ distractor-gallery.html
+state.json ─▶ extract ─▶ generate ─▶ score ─▶ compile ─▶ render ─▶ GUARD ─▶ manifest
+ (session)                                   (Flint)    (vl2svg)    │
+                                                                    ▼
+                                              build_gallery.mjs ─▶ gallery.html
 ```
 
-Run:
+## The guard (why rendering is part of the build)
+
+A lure that renders **pixel-identical to the original is a broken quiz item** —
+the participant is shown two correct answers. This is not hypothetical: the
+first version of this exploration shipped 17 such lures plus 22 duplicate pairs,
+and a gallery that had been "verified" by screenshot didn't reveal any of them.
+
+Spec-level identity is **not sufficient** to catch this class: `Bar Chart` and
+`Stacked Bar Chart` with no color channel are different chart types, different
+specs, identical renders. So every candidate is rendered and hashed, and the
+build **exits non-zero** if anything degenerate survives. Three drop reasons:
+
+| Reason | What it catches |
+|---|---|
+| `identical-to-original` | degenerate edits — perturbing an all-zero measure, a mark swap the compiler collapses back, a sort the renderer ignores |
+| `duplicate-of-kept-lure` | two methods reaching the same chart; first keeps it, the other is recorded as `alsoFoundBy` |
+| `degenerate-render` | chart draws `NaN`/`undefined` labels — visibly broken, so a participant eliminates it on sight and accuracy is inflated |
+
+A pass over zero charts proves nothing, so an empty or shrunken run is itself
+a failure.
+
+## Sort semantics (probed against the real compiler)
+
+- `sortOrder` on the **measure** channel is visually inert everywhere: it
+  compiles to a sort of a *quantitative* scale, which Vega-Lite renders
+  identically. Setting it there was the original no-op bug.
+- **`Bar Table` ignores `sortOrder` on every channel** — its template
+  hard-computes an explicit domain array from the data, so a sort flip is not
+  expressible at the semantic level for that chart type at all.
+- Sort lures therefore go on the **category** channel, and are skipped for
+  Bar Table.
+
+## Run
+
+From the repo root (main.ts resolves `vl2svg` from the cwd):
 
 ```bash
-# 1. bundle + generate specs & manifest
 node_modules/.bin/esbuild explorations/distractor-lab/main.ts --bundle \
   --platform=node --format=cjs --outfile=/tmp/distractor-lab.cjs
 node /tmp/distractor-lab.cjs \
   "py-src/data_formulator/example_analysis/Nic- FAA Wildlife Strikes/state.json" out
-
-# 2. render all specs (parallel)
-cd out && mkdir -p svg && ls specs/*.vl.json | sed 's|specs/||; s|\.vl\.json||' | \
-  xargs -P 8 -I {} <repo>/node_modules/.bin/vl2svg specs/{}.vl.json svg/{}.svg
-
-# 3. build the gallery
 node explorations/distractor-lab/build_gallery.mjs out distractor-gallery.html
 ```
+
+Rendering happens *inside* `main.ts` because the guard needs the rendered bytes;
+the run exits non-zero if any degenerate lure survives.
 
 ## Generation methods
 
 | Method | Idea | Distance profile |
 |---|---|---|
 | `enumeration` | CompassQL-style sweep of plausible charts over the same table, seeded by Flint's `vlRecommendEncodings` | spec > 0, data = 0 |
-| `graphscape` | Atomic edits (sort flip, transpose, mark change, field replace) composed into near/mid/far bands | spec 0.5–5+, data = 0 |
+| `graphscape` | Atomic edits (re-sort, transpose, mark change, field replace) composed into near/mid/far bands | spec 0.5–5+, data = 0 |
 | `data-perturb` | Same spec, perturbed values: rank swap, inversion, flatten/exaggerate, peak shift, label substitution | spec = 0, data > 0 |
 | `sibling-measure` | Swap the measure for a REAL unplotted column of the same derived table | spec ≈ 2, data = 0 |
 | `session-hybrid` | This chart's form × another session chart's content (shared measure/dimension) | both > 0 |
@@ -51,8 +78,23 @@ node explorations/distractor-lab/build_gallery.mjs out distractor-gallery.html
 - **Spec distance** — GraphScape-inspired edit cost recovered by *diffing* any
   lure against the original (`distance.ts`), so all methods are comparable.
   Cost ordering follows Kim et al. CHI 2017; absolute weights are ours.
+  Generators may additionally **declare** edits a diff cannot recover.
 - **Data distance** — max(rank disagreement, normalized RMSE, label turnover)
   of plotted values, in [0, 1].
+- **Order** — Kendall-tau distance of the *displayed* sequence, reported
+  separately and deliberately **not** folded into data distance.
+
+### Why order needed special handling
+
+A re-sorted lure changes no values, so `dataDistance` (which keys rows by
+category) scores it 0, and a spec diff recovers nothing because the rows are
+untouched. Left alone such a lure lands at `(0, 0)` — the coordinate that means
+*identical* — so a participant fooled by an order flip would be recorded as
+though there were no difference at all, silently deleting those events from the
+misrecall measure. Fixes: sort is a **declared** spec edit (0.5, matching
+GraphScape's treatment), and `order` is computed from the **compiled spec**,
+the only place the displayed sequence is knowable — a Bar Table re-sorts into
+an explicit domain array regardless of the order its rows arrive in.
 
 Study analysis this enables: on a miss, the chosen lure's (spec, data) pair is
 the misrecall datapoint; the distribution over participants separates *form*
@@ -69,6 +111,7 @@ memory from *pattern* memory.
 
 ## Caveats / next steps
 
+- Gallery: https://claude.ai/code/artifact/a21b8edc-9169-421a-a2c3-3bd5555d5068
 - Session-hybrid lures between two *versions* of the same analysis are flagged
   (`caveat`) — the participant saw both, so they only work as "which was your
   final version?" items.
