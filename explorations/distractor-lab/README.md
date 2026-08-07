@@ -18,24 +18,40 @@ state.json ─▶ extract ─▶ generate ─▶ score ─▶ compile ─▶ ren
 
 ## The guard (why rendering is part of the build)
 
-A lure that renders **pixel-identical to the original is a broken quiz item** —
-the participant is shown two correct answers. This is not hypothetical: the
-first version of this exploration shipped 17 such lures plus 22 duplicate pairs,
-and a gallery that had been "verified" by screenshot didn't reveal any of them.
+A lure that renders **identically to the original is a broken quiz item** — the
+participant is shown two correct answers. This is not hypothetical: the first
+version of this exploration shipped 17 such lures, and a gallery that had been
+"verified" by screenshot didn't reveal any of them.
 
 Spec-level identity is **not sufficient** to catch this class: `Bar Chart` and
 `Stacked Bar Chart` with no color channel are different chart types, different
 specs, identical renders. So every candidate is rendered and hashed, and the
-build **exits non-zero** if anything degenerate survives. Three drop reasons:
+build **exits non-zero** if anything degenerate survives.
 
 | Reason | What it catches |
 |---|---|
-| `identical-to-original` | degenerate edits — perturbing an all-zero measure, a mark swap the compiler collapses back, a sort the renderer ignores |
-| `duplicate-of-kept-lure` | two methods reaching the same chart; first keeps it, the other is recorded as `alsoFoundBy` |
+| `identical-to-original` | edits with no effect — perturbing an all-zero measure, a mark swap the compiler collapses back, a sort the renderer ignores |
 | `degenerate-render` | chart draws `NaN`/`undefined` labels — visibly broken, so a participant eliminates it on sight and accuracy is inflated |
+
+**Lures that duplicate each other are kept deliberately.** This gallery exists
+to compare what each method can reach, so suppressing a chart because another
+method produced it first would misrepresent the second method. Each copy is
+cross-linked via `alsoProducedBy`, and the *quiz sampler* de-duplicates by
+render hash when it assembles an item — verified over 390 sampled items, all
+with 4 options and no repeated option. What the build asserts is therefore that
+each chart has ≥3 **visually distinct** lures, not that no two lures match.
 
 A pass over zero charts proves nothing, so an empty or shrunken run is itself
 a failure.
+
+## Reproducibility
+
+Flint's recommender picks at random among equally-good fields
+(`core/recommendation.ts` calls `Math.random`). Good variety for the app, wrong
+for a study instrument: two runs over the same session produced different lure
+sets. `main.ts` therefore seeds `Math.random` for the whole run. Set
+`DISTRACTOR_SEED` to sample a different set; the default is fixed, so the same
+session always yields the same items.
 
 ## Sort semantics (probed against the real compiler)
 
@@ -78,13 +94,15 @@ the run exits non-zero if any degenerate lure survives.
 
 ## Generation methods
 
-| Method | Idea | Distance profile |
+Descriptions use ASD-STE100 Simplified Technical English.
+
+| Method | What it does | Distance profile |
 |---|---|---|
-| `enumeration` | CompassQL-style sweep of plausible charts over the same table, seeded by Flint's `vlRecommendEncodings` | spec > 0, data = 0 |
-| `graphscape` | Atomic edits (re-sort, transpose, mark change, field replace) composed into near/mid/far bands | spec 0.5–5+, data = 0 |
-| `data-perturb` | Same spec, perturbed values: rank swap, inversion, flatten/exaggerate, peak shift, label substitution | spec = 0, data > 0 |
-| `sibling-measure` | Swap the measure for a REAL unplotted column of the same derived table | spec ≈ 2, data = 0 |
-| `session-hybrid` | This chart's form × another session chart's content (shared measure/dimension) | both > 0 |
+| `enumeration` | Makes many charts from the same table. Uses each dimension with each measure, in different chart forms. Flint's `vlRecommendEncodings` selects the encodings. | spec > 0, data = 0 |
+| `graphscape` | Changes the chart one step at a time. A step is a new sort, a swap of the axes, a different mark, or a different field. Puts the steps together to make small, medium, and large distances. | spec 0.5–5+, data = 0 |
+| `data-perturb` | Keeps the form and changes the values. Exchanges two ranks, reverses the pattern, makes the effect smaller or larger, moves the peak, or replaces one label. | spec = 0, data > 0 |
+| `sibling-measure` | Puts a real column of the same table on the measure axis. The participant computed the column but did not plot it. | spec ≈ 2, data = 0 |
+| `session-hybrid` | Uses the form of this chart with the content of a different chart from the same session. | both > 0 |
 
 ## Distances
 

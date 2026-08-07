@@ -30,31 +30,33 @@ const svgOf = (file) => {
 };
 const fmt = (n) => (Math.round(n * 100) / 100).toString();
 
+// Method descriptions follow ASD-STE100 Simplified Technical English:
+// short sentences, active voice, present tense, one idea per sentence.
 const METHOD_INFO = {
     'enumeration': {
         name: 'Enumeration',
-        short: 'plausible-chart sweep',
-        desc: 'CompassQL-style sweep of plausible charts over the same derived table — every dimension × measure × chart-form cell, seeded by Flint’s own encoding recommender. “Which of the charts DF could have shown did you actually see?”',
+        short: 'many possible charts',
+        desc: 'This method makes many charts from the same table. It uses each dimension with each measure, in different chart forms. Flint’s recommender selects the encodings for each form. The participant must find the one chart that the session contains.',
     },
     'graphscape': {
         name: 'GraphScape walks',
-        short: 'controlled edit distance',
-        desc: 'Atomic spec edits (re-sort, transpose, mark change, field replacement) composed to hit near / mid / far distance bands, with GraphScape-ordered costs. The workhorse for the misrecall-distance analysis. Sort goes on the <i>category</i> channel with a <code>sortBy</code> channel reference, which is what produces a by-value order — on the measure channel it compiles to a sort of a quantitative scale and never changes the render.',
+        short: 'one edit at a time',
+        desc: 'This method changes the original chart one step at a time. A step is a single edit: a new sort, a swap of the two axes, a different mark, or a different field. Each edit has a cost. The method puts the edits together to make small, medium, and large distances. The sort goes on the category channel. On the measure channel, the sort applies to a quantitative scale, and the chart does not change.',
     },
     'data-perturb': {
         name: 'Data perturbation',
-        short: 'same form, different values',
-        desc: 'Identical spec, perturbed values: rank swaps, full pattern inversion, flattened / exaggerated effects, peak shifts, single-label substitution. Spec distance is 0 by construction — these isolate memory of the pattern from memory of the form.',
+        short: 'same form, new values',
+        desc: 'This method keeps the chart form and changes the values. It can exchange two ranks, reverse the pattern, make the effect smaller or larger, move the peak, or replace one label. The spec distance is always 0. These lures show if the participant remembers the pattern or only the form.',
     },
     'sibling-measure': {
         name: 'Sibling measure',
-        short: 'real unplotted columns',
-        desc: 'The participant’s own transform computed more columns than they plotted (incidents, any_damage_rate, totals). Swapping the measure to a real sibling column yields an internally-consistent chart of true data they never saw.',
+        short: 'real columns, not plotted',
+        desc: 'The transform of the participant made more columns than the participant plotted. Examples are incidents, any_damage_rate, and the totals. This method puts one of these real columns on the measure axis. The result is a correct chart of true data that the participant did not see.',
     },
     'session-hybrid': {
         name: 'Session hybrid',
-        short: 'interference lures',
-        desc: 'This chart’s visual form × another session chart’s content (shared measure or dimension). Models interference between similar analyses within the session — the classic source of recognition errors.',
+        short: 'content from another chart',
+        desc: 'This method uses the form of this chart with the content of a different chart. The two charts come from the same session and share a measure or a dimension. This shows the interference between two similar analyses. Interference is a usual cause of errors in recognition.',
     },
 };
 const METHOD_ORDER = ['graphscape', 'enumeration', 'data-perturb', 'sibling-measure', 'session-hybrid'];
@@ -109,8 +111,9 @@ function card(c, d) {
     const caveat = d.caveat ? `<p class="caveat" title="${esc(d.caveat)}">seen-both caveat — needs “final version?” phrasing</p>` : '';
     const order = d.dataDetail?.order
         ? `<span title="Kendall-tau distance of the displayed row order, read off the compiled spec">order <b>${fmt(d.dataDetail.order)}</b></span>` : '';
-    const also = (d.alsoFoundBy ?? []).length
-        ? `<p class="also">also reached by ${d.alsoFoundBy.map(a => `<span class="mchip m-${a.method}">${METHOD_INFO[a.method].name}</span>`).join(' ')}</p>` : '';
+    const also = (d.alsoProducedBy ?? []).length
+        ? `<p class="also">the same chart comes from ${[...new Set(d.alsoProducedBy.map(a => a.method))]
+              .map(mm => `<span class="mchip m-${mm}">${METHOD_INFO[mm].name}</span>`).join(' ')}</p>` : '';
     return `<figure class="card m-${d.method}" id="card-${d.id}" data-method="${d.method}" data-chart="${c.id}"
   data-spec="${d.specDist}" data-data="${d.dataDist}" data-label="${esc(d.label)}">
   <div class="chartbox">${svgOf(d.specFile)}</div>
@@ -172,7 +175,7 @@ const quizData = {};
 for (const c of manifest.charts) {
     quizData[c.id] = {
         title: c.title,
-        distractors: c.distractors.map(d => ({ id: d.id, method: d.method, label: d.label, spec: d.specDist, data: d.dataDist, caveat: !!d.caveat })),
+        distractors: c.distractors.map(d => ({ id: d.id, method: d.method, label: d.label, spec: d.specDist, data: d.dataDist, caveat: !!d.caveat, hash: d.renderHash })),
     };
 }
 
@@ -333,11 +336,12 @@ dialog.quiz::backdrop { background: rgba(10, 12, 16, 0.55); }
 <div class="wrap">
 <header class="page-head">
   <h1>Distractor Lab — chart-recognition quiz over Nic’s FAA Wildlife Strikes analysis</h1>
-  <p class="sub">Five ways to generate “which chart did you actually see?” lures for every chart in the study session.
-  All lures are compiled and rendered by Data Formulator’s own chart pipeline (Flint), so they are visually
-  in-distribution with the originals. Every lure is scored on two orthogonal axes: <b>spec distance</b>
-  (GraphScape-style edit cost — how different the visual form is) and <b>data distance</b> (how different the
-  plotted values are). When a participant picks a lure, those two numbers say <i>what</i> they mis-remembered.</p>
+  <p class="sub">Five methods make the wrong answers for the question “which chart did you see?”.
+  Each method operates on each chart in the study session. Data Formulator’s own chart pipeline (Flint)
+  compiles and renders each lure. Therefore each lure looks like the charts that the participant made.
+  Each lure has two scores. The <b>spec distance</b> shows how much the form changed. The
+  <b>data distance</b> shows how much the values changed. If the participant selects a lure, these two
+  numbers show what the participant did not remember correctly.</p>
   <p class="facts">${manifest.charts.length} session charts · ${totalLures} distractors · methods: ${METHOD_ORDER.map(m => `${METHOD_INFO[m].name} ${methodCounts[m] ?? 0}`).join(' · ')}</p>
 </header>
 
@@ -349,23 +353,24 @@ ${METHOD_ORDER.map(m => `<div class="mcard m-${m}">
 </div>
 
 <div class="guard">
-  <h2>Render-identity guard</h2>
-  <p>A lure that renders <i>pixel-identical</i> to the original is a broken quiz item — the participant
-  would be shown two correct answers. Spec-level identity does not catch these (a “Bar Chart” and a
-  “Stacked Bar Chart” with no color channel are different specs that render the same), so every candidate
-  is rendered and hashed, and anything matching the original — or a lure already kept — is dropped.
-  The build fails if any survive. This table is what the guard removed on this run.</p>
+  <h2>Render guard</h2>
+  <p>A lure that renders the same as the original is a broken quiz item. The participant then sees two
+  correct answers. A comparison of the specs does not find all of these: a “Bar Chart” and a
+  “Stacked Bar Chart” with no color channel have different specs, but they render the same. Therefore the
+  build renders each candidate and compares the images. The build stops with an error if a bad lure stays.</p>
+  <p><b>Lures that repeat each other stay in the gallery.</b> This page shows what each method can make,
+  so it does not hide a chart because a different method made it first. Each copy shows the other methods
+  that make the same chart. The quiz sampler removes the repeats when it builds an item, so one item never
+  shows the same chart two times.</p>
   <div class="guardwrap"><table>
-    <thead><tr><th>Reason</th><th>Dropped</th><th>What it was</th></tr></thead>
+    <thead><tr><th>Reason</th><th>Removed</th><th>What it was</th></tr></thead>
     <tbody>
-      <tr><td>identical to original</td><td><b>${manifest.dropSummary?.['identical-to-original'] ?? 0}</b></td>
-        <td>degenerate edits — e.g. perturbing a measure that is all zeros, or a mark swap the compiler collapses back</td></tr>
-      <tr><td>duplicate of a kept lure</td><td><b>${manifest.dropSummary?.['duplicate-of-kept-lure'] ?? 0}</b></td>
-        <td>two methods reaching the same chart; first keeps it, the other is recorded as “also reached by”</td></tr>
-      <tr><td>degenerate render</td><td><b>${manifest.dropSummary?.['degenerate-render'] ?? 0}</b></td>
-        <td>chart drew <code>NaN</code>/<code>undefined</code> labels — visibly broken, so a participant could eliminate it on sight and inflate accuracy</td></tr>
-      ${manifest.dropSummary?.['render-failed'] ? `<tr><td>render failed</td><td><b>${manifest.dropSummary['render-failed']}</b></td><td>candidate did not survive Vega-Lite rendering</td></tr>` : ''}
-      ${manifest.dropSummary?.['compile-failed'] ? `<tr><td>compile failed</td><td><b>${manifest.dropSummary['compile-failed']}</b></td><td>candidate did not compile to a valid spec</td></tr>` : ''}
+      <tr><td>same as the original</td><td><b>${manifest.dropSummary?.['identical-to-original'] ?? 0}</b></td>
+        <td>an edit with no effect — for example, a change to a measure that is all zeros, or a sort that the renderer ignores</td></tr>
+      <tr><td>bad render</td><td><b>${manifest.dropSummary?.['degenerate-render'] ?? 0}</b></td>
+        <td>the chart shows <code>NaN</code> or <code>undefined</code> labels. The participant sees that it is bad and removes it, and the accuracy becomes too high</td></tr>
+      ${manifest.dropSummary?.['render-failed'] ? `<tr><td>render failed</td><td><b>${manifest.dropSummary['render-failed']}</b></td><td>the renderer could not draw the candidate</td></tr>` : ''}
+      ${manifest.dropSummary?.['compile-failed'] ? `<tr><td>compile failed</td><td><b>${manifest.dropSummary['compile-failed']}</b></td><td>the candidate did not make a valid spec</td></tr>` : ''}
     </tbody>
   </table></div>
 </div>
@@ -479,11 +484,19 @@ function sampleQuiz(chartId) {
   }
   const methods = [...byMethod.keys()];
   for (let i = methods.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [methods[i], methods[j]] = [methods[j], methods[i]]; }
-  const lures = methods.slice(0, 3).map(m => byMethod.get(m));
-  while (lures.length < 3 && pool.length > lures.length) {
-    const next = pool.find(d => !lures.includes(d));
-    if (!next) break; lures.push(next);
-  }
+
+  // De-duplicate BY RENDER, not by identity. The gallery deliberately keeps
+  // lures that different methods produced as the same chart, so a naive pick
+  // of one lure per method can land two identical options in one item.
+  const usedHashes = new Set();
+  const lures = [];
+  const take = (d) => {
+    if (!d || lures.length >= 3 || usedHashes.has(d.hash)) return;
+    usedHashes.add(d.hash);
+    lures.push(d);
+  };
+  for (const m of methods) take(byMethod.get(m));
+  for (const d of pool) take(d);
   const options = [{ id: chartId + '_orig', orig: true }, ...lures.map(d => ({ id: d.id, orig: false, d }))];
   for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
   return options;

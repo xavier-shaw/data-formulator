@@ -44,8 +44,26 @@ if (!fs.existsSync(VL2SVG)) {
     process.exit(1);
 }
 
+// ── determinism ──────────────────────────────────────────────────────────
+// Flint's recommender picks at random among equally-good fields
+// (core/recommendation.ts uses Math.random in pickBestGroupingField and
+// friends). That is good variety for the app and wrong for a study
+// instrument: the same session must always yield the same quiz items, or the
+// items cannot be reproduced, audited, or counterbalanced. Seed the generator
+// for the whole run; override with DISTRACTOR_SEED to sample a different set.
+const SEED = Number(process.env.DISTRACTOR_SEED ?? 20260807);
+Math.random = (() => {
+    let a = SEED >>> 0;
+    return () => {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+})();
+
 const session = loadSession(statePath);
-console.log(`session: ${session.charts.length} charts, ${Object.keys(session.tables).length} tables`);
+console.log(`session: ${session.charts.length} charts, ${Object.keys(session.tables).length} tables (seed ${SEED})`);
 
 const specsDir = path.join(outDir, 'specs');
 const svgDir = path.join(outDir, 'svg');
@@ -211,11 +229,16 @@ async function run() {
         };
 
         // ── the guard ────────────────────────────────────────────────────
-        // Drop anything that renders identically to the original (two correct
-        // answers) or to a lure already kept (two identical options). First
-        // method to find a render wins; later finders are recorded so the
-        // gallery can still show a lure was reachable more than one way.
-        const keptByHash = new Map<string, any>();
+        // Drop anything that renders identically to the ORIGINAL: such a lure
+        // is not a distractor at all, and the quiz item would have two correct
+        // answers.
+        //
+        // Lures that duplicate EACH OTHER are kept on purpose. This gallery
+        // compares what each method can reach, so hiding a chart because a
+        // different method found it first would misrepresent the method that
+        // also found it. Convergence is recorded on both copies instead, and
+        // the quiz sampler de-duplicates by render hash when it builds an item.
+        const keptByHash = new Map<string, any[]>();
         selected.forEach((c, i) => {
             const id = idOf.get(i);
             if (!id) return;
@@ -233,14 +256,9 @@ async function run() {
 
             const h = renderHash(svg);
             if (h === origHash) return drop('identical-to-original');
-            const twin = keptByHash.get(h);
-            if (twin) {
-                twin.alsoFoundBy = twin.alsoFoundBy ?? [];
-                twin.alsoFoundBy.push({ method: c.method, label: c.label });
-                return drop('duplicate-of-kept-lure', twin.label);
-            }
 
             const entry = {
+                renderHash: h,
                 id,
                 method: c.method,
                 label: c.label,
@@ -254,11 +272,23 @@ async function run() {
                 dataEditNote: c.dataEditNote,
                 caveat: c.caveat,
                 specFile: `${id}.vl.json`,
-                alsoFoundBy: undefined as any,
+                alsoProducedBy: [] as { method: Method; label: string }[],
             };
-            keptByHash.set(h, entry);
+            if (!keptByHash.has(h)) keptByHash.set(h, []);
+            keptByHash.get(h)!.push(entry);
             chartEntry.distractors.push(entry);
         });
+
+        // Cross-link every group of lures that render the same, so each copy
+        // shows which other methods reached the same chart.
+        for (const group of keptByHash.values()) {
+            if (group.length < 2) continue;
+            for (const e of group) {
+                e.alsoProducedBy = group
+                    .filter(o => o !== e)
+                    .map(o => ({ method: o.method, label: o.label }));
+            }
+        }
 
         kept += chartEntry.distractors.length;
         manifest.charts.push(chartEntry);
@@ -294,20 +324,27 @@ async function run() {
             const svg = fs.readFileSync(path.join(svgDir, `${d.id}.svg`), 'utf-8');
             const h = renderHash(svg);
             if (h === oh) { console.error(`  VIOLATION identical-to-original: ${c.title} / ${d.label}`); violations++; }
-            if (seen.has(h)) { console.error(`  VIOLATION duplicate: ${c.title} / ${d.label} == ${seen.get(h)}`); violations++; }
             const broken = degenerateText(svg);
             if (broken.length) { console.error(`  VIOLATION degenerate-render (${broken.join('/')}): ${c.title} / ${d.label}`); violations++; }
             seen.set(h, d.label);
         }
-        if (c.distractors.length < 3) {
-            console.warn(`  NOTE only ${c.distractors.length} lures survive for "${c.title}" (need 3 for a 4-option item)`);
+        // Lures that duplicate each other are kept deliberately. What must hold
+        // is that enough VISUALLY DISTINCT lures remain to build a 4-option
+        // item, since the quiz sampler de-duplicates by render.
+        if (seen.size < 3) {
+            console.error(`  VIOLATION only ${seen.size} distinct lure(s) for "${c.title}" — a 4-option item needs 3`);
+            violations++;
         }
     }
     if (violations > 0) {
         console.error(`\nFAILED: ${violations} degenerate lure(s) survived the guard.`);
         process.exit(1);
     }
-    console.log('guard verified: no lure is pixel-identical to its original or to another kept lure.');
+    const distinct = manifest.charts.map((c: any) => new Set(c.distractors.map((d: any) => d.renderHash)).size);
+    const twins = kept - distinct.reduce((a: number, b: number) => a + b, 0);
+    console.log(`guard verified: no lure renders identically to its original; ` +
+        `${twins} lure(s) reproduce another method's chart and are kept on purpose ` +
+        `(min ${Math.min(...distinct)} visually distinct per chart).`);
 }
 
 run().catch(e => { console.error(e); process.exit(1); });
