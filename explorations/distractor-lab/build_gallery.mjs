@@ -15,10 +15,11 @@ import * as path from 'path';
 const [outDir, htmlPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf-8'));
 
-// Refuse to build a gallery from an unguarded manifest — the whole point of
-// the drop report is that it is present and honest.
 if (!manifest.charts?.length) throw new Error('manifest has no charts');
-if (!manifest.drops) throw new Error('manifest predates the render-identity guard; re-run main.ts');
+if (!manifest.drops) throw new Error('manifest predates the render guard; re-run main.ts');
+// The published cost table must be the one the scorer actually used.
+if (!manifest.editCosts) throw new Error('manifest has no editCosts; re-run main.ts');
+const EC = manifest.editCosts;
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const svgOf = (file) => {
@@ -278,9 +279,11 @@ h1, h2, h3 { font-family: "Avenir Next", "Seravek", -apple-system, "Segoe UI", s
 
 .mgroup { margin-bottom: 18px; }
 .mlabel { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--mc); margin: 0 0 8px; }
-.cards { display: flex; flex-wrap: wrap; gap: 14px; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1150px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .cards { grid-template-columns: minmax(0, 1fr); } }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; margin: 0;
-  width: 236px; padding: 8px; display: flex; flex-direction: column; }
+  min-width: 0; padding: 8px; display: flex; flex-direction: column; }
 .card.m-enumeration, .card.m-graphscape, .card.m-data-perturb, .card.m-sibling-measure, .card.m-session-hybrid { border-top: 3px solid var(--mc); }
 .chartbox { background: #fff; border-radius: 4px; display: flex; justify-content: center; align-items: center;
   min-height: 150px; overflow: hidden; }
@@ -289,15 +292,26 @@ h1, h2, h3 { font-family: "Avenir Next", "Seravek", -apple-system, "Segoe UI", s
 .mchip { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--mc); border: 1px solid var(--mc); border-radius: 3px; padding: 0 4px; }
 .also { font-size: 11px; color: var(--ink-3); margin: 6px 0 0; }
-.guard { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; margin: 0 0 26px; }
+.guard { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; margin: 0 0 26px; }
 .guard h2 { margin: 0 0 4px; font-size: 17px; }
+.guard h3 { margin: 0 0 6px; font-size: 14px; color: var(--accent); }
+.guard h3 em { font-style: normal; text-decoration: underline; text-underline-offset: 3px; }
 .guard p { color: var(--ink-2); font-size: 13.5px; max-width: 92ch; margin: 2px 0 12px; }
 .guard table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
 .guard th { text-align: left; color: var(--ink-3); font-weight: 600; font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); }
 .guard td { padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.guard td:last-child { text-align: right; padding-right: 0; }
+.guard th:last-child { text-align: right; padding-right: 0; }
 .guard td b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .guardwrap { overflow-x: auto; }
+.dexp { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 26px; margin-top: 14px; }
+.dexp section { min-width: 0; }
+.parts { margin: 0 0 12px; font-size: 13px; }
+.parts dt { color: var(--ink); font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; margin-top: 8px; }
+.parts dd { margin: 2px 0 0; color: var(--ink-2); }
+.fine { font-size: 12.5px; color: var(--ink-3) !important; }
+.takeaway { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 6px !important; max-width: none !important; }
 .dist { font-size: 12px; color: var(--ink-2); margin: 0 0 4px; display: flex; gap: 12px; }
 .dist b { color: var(--ink); }
 .edits { list-style: none; margin: 0; padding: 0; font-size: 11px; color: var(--ink-2); }
@@ -353,26 +367,54 @@ ${METHOD_ORDER.map(m => `<div class="mcard m-${m}">
 </div>
 
 <div class="guard">
-  <h2>Render guard</h2>
-  <p>A lure that renders the same as the original is a broken quiz item. The participant then sees two
-  correct answers. A comparison of the specs does not find all of these: a “Bar Chart” and a
-  “Stacked Bar Chart” with no color channel have different specs, but they render the same. Therefore the
-  build renders each candidate and compares the images. The build stops with an error if a bad lure stays.</p>
-  <p><b>Lures that repeat each other stay in the gallery.</b> This page shows what each method can make,
-  so it does not hide a chart because a different method made it first. Each copy shows the other methods
-  that make the same chart. The quiz sampler removes the repeats when it builds an item, so one item never
-  shows the same chart two times.</p>
-  <div class="guardwrap"><table>
-    <thead><tr><th>Reason</th><th>Removed</th><th>What it was</th></tr></thead>
-    <tbody>
-      <tr><td>same as the original</td><td><b>${manifest.dropSummary?.['identical-to-original'] ?? 0}</b></td>
-        <td>an edit with no effect — for example, a change to a measure that is all zeros, or a sort that the renderer ignores</td></tr>
-      <tr><td>bad render</td><td><b>${manifest.dropSummary?.['degenerate-render'] ?? 0}</b></td>
-        <td>the chart shows <code>NaN</code> or <code>undefined</code> labels. The participant sees that it is bad and removes it, and the accuracy becomes too high</td></tr>
-      ${manifest.dropSummary?.['render-failed'] ? `<tr><td>render failed</td><td><b>${manifest.dropSummary['render-failed']}</b></td><td>the renderer could not draw the candidate</td></tr>` : ''}
-      ${manifest.dropSummary?.['compile-failed'] ? `<tr><td>compile failed</td><td><b>${manifest.dropSummary['compile-failed']}</b></td><td>the candidate did not make a valid spec</td></tr>` : ''}
-    </tbody>
-  </table></div>
+  <h2>How the two distances are calculated</h2>
+  <p>Each lure has two scores. They measure two different things, so a lure can be near on one score
+  and far on the other. Every card below shows both.</p>
+  <div class="dexp">
+    <section>
+      <h3>Spec distance — how much the <em>form</em> changed</h3>
+      <p>The tool compares the lure with the original chart and makes a list of the differences.
+      Each difference is one edit. Each edit has a cost. The tool adds the costs together.
+      A large total means the lure looks very different.</p>
+      <div class="guardwrap"><table>
+        <thead><tr><th>Edit</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Sort the rows in a different order</td><td><b>${fmt(EC.SORT_FLIP)}</b></td></tr>
+          <tr><td>Change a chart property, such as the line shape</td><td><b>${fmt(EC.CONFIG_TWEAK)}</b></td></tr>
+          <tr><td>Change the mark to a near one (bar → lollipop)</td><td><b>${fmt(EC.MARK_NEAR)}</b></td></tr>
+          <tr><td>Exchange the two axes</td><td><b>${fmt(EC.TRANSPOSE)}</b></td></tr>
+          <tr><td>Move a field to a different channel</td><td><b>${fmt(EC.CHANNEL_MOVE)}</b></td></tr>
+          <tr><td>Add or remove a field</td><td><b>${fmt(EC.ADD_ENCODING)}</b></td></tr>
+          <tr><td>Change the mark to a different family (bar → line)</td><td><b>${fmt(EC.MARK_MID)}–${fmt(EC.MARK_FAR)}</b></td></tr>
+          <tr><td>Put a different field on an axis</td><td><b>${fmt(EC.FIELD_REPLACE_SAME_TYPE)}–${fmt(EC.FIELD_REPLACE_DIFF_TYPE)}</b></td></tr>
+        </tbody>
+      </table></div>
+      <p class="fine">The order of these costs comes from GraphScape (Kim et al., 2017): a small change
+      to the same chart costs less than a new mark, and a new mark costs less than a new field.
+      The exact values are ours.</p>
+    </section>
+    <section>
+      <h3>Data distance — how much the <em>values</em> changed</h3>
+      <p>The tool matches the rows of the two charts by their category name. Then it measures three
+      parts. Each part is between 0 and 1.</p>
+      <dl class="parts">
+        <dt>rank</dt><dd>Do the categories keep the same order of size? 0 means the same order.
+          1 means the opposite order.</dd>
+        <dt>magnitude</dt><dd>How far did the values move? The tool compares the movement with the
+          full range of the original values.</dd>
+        <dt>label</dt><dd>Are the categories the same? The value increases when a category is new or
+          is not there.</dd>
+      </dl>
+      <p>The data distance is the <b>largest</b> of the three parts. A lure is only as similar as its
+      most changed part.</p>
+      <p class="fine"><b>Order is a third number, shown only when it is not 0.</b> A chart with new sort
+      keeps all of its values, so the data distance stays 0. Therefore the tool measures the order on the
+      screen separately, and adds ${fmt(EC.SORT_FLIP)} to the spec distance, because a sort changes the form.</p>
+    </section>
+  </div>
+  <p class="takeaway">If the participant selects a lure, the two numbers show what the participant did not
+  remember. A lure with a <b>small spec distance and a large data distance</b> shows that the participant
+  remembers the form but not the values. The opposite result shows the opposite.</p>
 </div>
 
 <div class="overview">
@@ -407,22 +449,16 @@ ${manifest.charts.map(section).join('\n')}
   A production QuizGenAgent can author further <i>semantically plausible</i> lures as Flint specs directly
   (e.g. “confuse the rate with the count”) — the sibling-measure and session-hybrid methods are the
   deterministic core of that idea.</p>
-  <h2>Order is a spec property, not a data property</h2>
-  <p>A re-sorted lure changes no values, so <code>dataDistance</code> — which keys rows by category —
-  scores it 0, and a spec diff recovers nothing because the rows are untouched. Left alone it would land at
-  <code>(0, 0)</code>: the coordinate that means “identical”, which would quietly delete every order-based
-  misrecall from the analysis. Two fixes: generators <i>declare</i> edits a diff cannot recover (so a re-sort
-  costs 0.5 on the spec axis, matching GraphScape's treatment of sort), and the reported
-  <code>order</code> figure is a Kendall-tau distance computed from the <i>compiled</i> spec — the only place
-  the displayed sequence is knowable, since a Bar Table re-sorts into an explicit domain array no matter what
-  order its rows arrive in.</p>
-  <h2>Distances</h2>
-  <p><b>Spec distance</b> sums GraphScape-ordered edit costs recovered by diffing lure vs original:
-  sort flip 0.5 · within-family mark swap 1.0 · transpose 1.0 · channel move 1.2 · add/remove encoding 1.4 ·
-  cross-family mark 1.8–2.6 · field replacement 2.0–2.8. <b>Data distance</b> is
-  max(rank disagreement, normalized magnitude change, label turnover) of the plotted values, in [0, 1].
-  In the study, the (spec, data) coordinates of the lure a participant chooses — averaged over misses —
-  estimate what they actually encoded: form, pattern, or neither.</p>
+  <h2>Which lures are removed</h2>
+  <p>The build renders every candidate and compares the images, because a comparison of the specs is not
+  enough — a “Bar Chart” and a “Stacked Bar Chart” with no color channel have different specs but render the
+  same. A lure that renders like the original is removed: it would give the participant two correct answers.
+  A lure that draws <code>NaN</code> labels is also removed, because the participant sees that it is broken
+  and removes it without any memory of the session. On this run that was
+  ${manifest.dropSummary?.['identical-to-original'] ?? 0} and ${manifest.dropSummary?.['degenerate-render'] ?? 0} lures.
+  Lures that repeat <i>each other</i> are kept, so that each method shows everything it can make; the quiz
+  sampler removes the repeats when it builds an item. Generation is seeded (${manifest.seed}), so the same
+  session always gives the same lures.</p>
 </div>
 </main>
 </div>

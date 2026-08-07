@@ -28,7 +28,7 @@ import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { loadSession, compileToVegaLite } from './lib';
 import { generateAll, chartRoles, DistractorCandidate, Method } from './generators';
-import { specDiff, specDistance, dataDistance, mergeEdits, displayedOrder, kendallTauDistance } from './distance';
+import { specDiff, specDistance, dataDistance, mergeEdits, displayedOrder, kendallTauDistance, EDIT_COSTS } from './distance';
 
 const [statePath, outDir, vl2svgArg] = process.argv.slice(2);
 if (!statePath || !outDir) {
@@ -144,6 +144,10 @@ async function run() {
     const manifest: any = {
         charts: [],
         generatedFor: path.basename(path.dirname(statePath)),
+        // Published so the gallery documents the costs it actually used;
+        // a hand-written table in the HTML would drift from the code.
+        editCosts: EDIT_COSTS,
+        seed: SEED,
         drops: [] as DropRecord[],
         dropSummary: {} as Record<string, number>,
     };
