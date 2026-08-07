@@ -26,8 +26,14 @@ export interface FieldMeta {
 /** Chart-level spec: everything needed to compile one chart. */
 export interface ChartLevelSpec {
     chartType: string;
-    /** channel -> field name (only channels that carry a field) */
-    encodings: Record<string, { field: string; sortOrder?: string; aggregate?: string }>;
+    /**
+     * channel -> field name (only channels that carry a field).
+     * `sortBy` is a CHANNEL reference ('x' | 'y' | 'color'), not a field name —
+     * that is what the assembler expects, and it is what turns `sortOrder` into
+     * a by-value sort (VL's `"y"` / `"-y"` shorthand) rather than an
+     * alphabetical one.
+     */
+    encodings: Record<string, { field: string; sortOrder?: string; sortBy?: string; aggregate?: string }>;
     config?: Record<string, any>;
 }
 
@@ -78,6 +84,7 @@ export function loadSession(statePath: string): SessionData {
             if (!field) continue;
             encodings[channel] = { field };
             if (enc.sortOrder) encodings[channel].sortOrder = enc.sortOrder;
+            if (enc.sortBy) encodings[channel].sortBy = enc.sortBy;
             if (enc.aggregate) encodings[channel].aggregate = enc.aggregate;
         }
         if (Object.keys(encodings).length === 0) continue;
@@ -159,7 +166,7 @@ export function cloneSpec(spec: ChartLevelSpec): ChartLevelSpec {
 /** Canonical signature of a chart-level spec (for dedupe). */
 export function specSignature(spec: ChartLevelSpec): string {
     const enc = Object.entries(spec.encodings)
-        .map(([ch, e]) => `${ch}:${e.field}:${e.sortOrder ?? ''}:${e.aggregate ?? ''}`)
+        .map(([ch, e]) => `${ch}:${e.field}:${e.sortOrder ?? ''}:${e.sortBy ?? ''}:${e.aggregate ?? ''}`)
         .sort()
         .join('|');
     return `${spec.chartType}||${enc}`;

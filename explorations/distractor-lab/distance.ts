@@ -248,15 +248,28 @@ export function displayedOrder(vl: any, categoryField: string | undefined, rows:
     };
     walk(vl);
 
+    const byField = (field: string, dir: number) => [...rows]
+        .sort((a, b) => dir * (Number(a[field]) - Number(b[field])))
+        .map(r => String(r[categoryField]));
+
     if (Array.isArray(sort)) return sort.map(String);
     if (sort === 'ascending') return [...new Set(dataOrder())].sort();
     if (sort === 'descending') return [...new Set(dataOrder())].sort().reverse();
     if (sort && typeof sort === 'object' && typeof sort.field === 'string') {
-        const by = unescape(sort.field);
-        const dir = sort.order === 'descending' ? -1 : 1;
-        return [...rows]
-            .sort((a, b) => dir * (Number(a[by]) - Number(b[by])))
-            .map(r => String(r[categoryField]));
+        return byField(unescape(sort.field), sort.order === 'descending' ? -1 : 1);
+    }
+    // Vega-Lite channel shorthand: "y" / "-y" — sort the discrete axis by the
+    // field encoded on that channel. Emitted whenever sortBy is used.
+    if (typeof sort === 'string' && /^-?(x|y|color)$/.test(sort)) {
+        const ch = sort.replace('-', '');
+        let refField: string | undefined;
+        const findCh = (o: any): void => {
+            if (!o || typeof o !== 'object' || refField) return;
+            if (o[ch] && typeof o[ch].field === 'string') { refField = unescape(o[ch].field); return; }
+            for (const v of Object.values(o)) if (v && typeof v === 'object') findCh(v);
+        };
+        findCh(vl.encoding ?? vl);
+        if (refField) return byField(refField, sort.startsWith('-') ? -1 : 1);
     }
     return dataOrder();
 }

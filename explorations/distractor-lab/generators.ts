@@ -185,24 +185,37 @@ export function genGraphscape(chart: SessionChart): DistractorCandidate[] {
         } catch { return undefined; }
     };
 
-    // NEAR (≈1 edit, cheap): sort flip, near-family mark change, transpose
+    // NEAR (≈1 edit, cheap): re-sort, near-family mark change, transpose
     //
-    // Sort must go on the CATEGORY channel. Probed against the real compiler:
-    //   • sortOrder on the *measure* channel compiles to a sort on a
-    //     quantitative scale — the compiled spec changes but the render never
+    // Sort goes on the CATEGORY channel. Probed against the real compiler:
+    //   • sortOrder on the *measure* channel is inert — it compiles to a sort
+    //     of a quantitative scale, so the spec changes but the render never
     //     does. (This shipped as a no-op on all 13 charts before it was caught.)
-    //   • "Bar Table" ignores sortOrder on *every* channel: its template
-    //     hard-computes an explicit domain array from the data, so sort flip is
-    //     not expressible at the semantic level there at all.
-    // The render-identity guard in main.ts is the backstop either way.
-    if (roles.categoryCh && chart.spec.chartType !== 'Bar Table') {
+    //   • sortOrder alone on the category channel gives an ALPHABETICAL order.
+    //   • sortBy — which takes a CHANNEL reference, not a field name — turns it
+    //     into a BY-VALUE sort (VL's "y" / "-y" shorthand). This is the lure
+    //     that matters: "was the largest bar at the top or the bottom?"
+    //     It works for Bar Table too, whose template otherwise hard-codes a
+    //     descending domain array and ignores sortOrder on its own.
+    // The render-identity guard in main.ts drops whichever turns out inert.
+    if (roles.categoryCh && roles.measureCh) {
+        for (const dir of ['ascending', 'descending'] as const) {
+            const s = cloneSpec(chart.spec);
+            s.encodings[roles.categoryCh].sortBy = roles.measureCh;
+            s.encodings[roles.categoryCh].sortOrder = dir;
+            push(s, `sorted ${dir} by value`,
+                `Same fields and same values, ranked ${dir} — was the largest ${roles.category} at the top or the bottom?`,
+                [{ op: 'SORT', detail: `${roles.categoryCh}: by ${roles.measure} ${dir}`, cost: EDIT_COSTS.SORT_FLIP }]);
+        }
+    }
+    if (roles.categoryCh) {
         for (const dir of ['ascending', 'descending'] as const) {
             if (chart.spec.encodings[roles.categoryCh]?.sortOrder === dir) continue;
             const s = cloneSpec(chart.spec);
             s.encodings[roles.categoryCh].sortOrder = dir;
-            push(s, `sorted ${dir}`,
-                `Same fields and values, rows re-ordered ${dir} along the ${roles.category} axis — do they remember the arrangement, or only the content?`,
-                [{ op: 'SORT', detail: `${roles.categoryCh}: default → ${dir}`, cost: EDIT_COSTS.SORT_FLIP }]);
+            push(s, `sorted ${dir} by label`,
+                `Same fields and values, ordered alphabetically by ${roles.category} instead of by size.`,
+                [{ op: 'SORT', detail: `${roles.categoryCh}: label ${dir}`, cost: EDIT_COSTS.SORT_FLIP }]);
         }
     }
     for (const t of NEAR_MARKS[chart.spec.chartType] ?? []) {

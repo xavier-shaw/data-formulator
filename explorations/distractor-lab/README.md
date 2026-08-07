@@ -39,14 +39,27 @@ a failure.
 
 ## Sort semantics (probed against the real compiler)
 
-- `sortOrder` on the **measure** channel is visually inert everywhere: it
+Every claim here was checked by compiling specs and diffing the output, not by
+reading the code:
+
+- `sortOrder` on the **measure** channel is visually inert everywhere. It
   compiles to a sort of a *quantitative* scale, which Vega-Lite renders
-  identically. Setting it there was the original no-op bug.
-- **`Bar Table` ignores `sortOrder` on every channel** — its template
-  hard-computes an explicit domain array from the data, so a sort flip is not
-  expressible at the semantic level for that chart type at all.
-- Sort lures therefore go on the **category** channel, and are skipped for
-  Bar Table.
+  identically. Setting it there was the original no-op bug — it shipped as a
+  do-nothing lure on all 13 charts.
+- `sortOrder` alone on the **category** channel gives an **alphabetical** order.
+- `sortBy` takes a **channel reference** (`'x'`/`'y'`/`'color'`), *not* a field
+  name — passing a field name throws inside the assembler. Paired with
+  `sortOrder` it emits VL's `"y"` / `"-y"` shorthand, giving a **by-value**
+  sort. This is the lure that matters: *was the largest bar at the top or the
+  bottom?*
+- **`Bar Table` is inert to sort on this session's data** — all four
+  combinations above compile byte-identically, because its template derives an
+  explicit domain array itself. (A synthetic table *did* respond to `sortBy`,
+  so the behavior is data-dependent; the guard resolves it per chart rather
+  than the generator assuming either way.)
+
+Sort lures are therefore generated for every chart, and the render-identity
+guard drops the ones that turn out inert — which is every Bar Table here.
 
 ## Run
 

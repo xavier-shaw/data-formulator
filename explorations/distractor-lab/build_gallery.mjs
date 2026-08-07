@@ -39,7 +39,7 @@ const METHOD_INFO = {
     'graphscape': {
         name: 'GraphScape walks',
         short: 'controlled edit distance',
-        desc: 'Atomic spec edits (re-sort, transpose, mark change, field replacement) composed to hit near / mid / far distance bands, with GraphScape-ordered costs. The workhorse for the misrecall-distance analysis. Sort is applied to the <i>category</i> channel — on the measure channel it compiles to a sort of a quantitative scale and never changes the render.',
+        desc: 'Atomic spec edits (re-sort, transpose, mark change, field replacement) composed to hit near / mid / far distance bands, with GraphScape-ordered costs. The workhorse for the misrecall-distance analysis. Sort goes on the <i>category</i> channel with a <code>sortBy</code> channel reference, which is what produces a by-value order — on the measure channel it compiles to a sort of a quantitative scale and never changes the render.',
     },
     'data-perturb': {
         name: 'Data perturbation',
