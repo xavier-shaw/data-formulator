@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 
 const [outDir, htmlPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf-8'));
@@ -20,13 +21,49 @@ if (!manifest.drops) throw new Error('manifest predates the render guard; re-run
 // The published cost table must be the one the scorer actually used.
 if (!manifest.editCosts) throw new Error('manifest has no editCosts; re-run main.ts');
 const EC = manifest.editCosts;
+// Session name for the title/header, taken from the manifest (the source folder)
+// so the gallery labels itself correctly whichever session it was built from.
+const SESSION = manifest.generatedFor || 'the study session';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Rasterize heavy SVGs to PNG so the self-contained page stays under the 16 MB
+// artifact limit. Maps (embedded topojson, ~2000 paths) and dense heatmaps
+// (600 cells) produce 1–4 MB SVGs, and the data-URI encoding inflates SVG text
+// 2–3×; the same chart as a ~2× PNG is tens of KB. Normal bar/line charts stay
+// crisp SVG. Threshold is on the raw SVG bytes.
+const RASTER_THRESHOLD = 100_000;   // bytes of raw SVG
+const RASTER_WIDTH = 560;           // ~2× the card width, retina-sharp
+const RSVG = process.env.RSVG || 'rsvg-convert';
+let rasterOK = null;                // lazily probed once
+let rasterCount = 0;
+
+function rasterizeToPngDataUri(svgPath) {
+    try {
+        const png = execFileSync(RSVG, ['-w', String(RASTER_WIDTH), svgPath], { maxBuffer: 1 << 28 });
+        rasterCount++;
+        return `data:image/png;base64,${png.toString('base64')}`;
+    } catch {
+        return null; // fall back to inline SVG (larger, but still correct)
+    }
+}
+
 const svgOf = (file) => {
-    const raw = fs.readFileSync(path.join(outDir, 'svg', file.replace('.vl.json', '.svg')), 'utf-8')
-        .replace(/^<\?xml[^>]*\?>\s*/, '');
+    const svgPath = path.join(outDir, 'svg', file.replace('.vl.json', '.svg'));
+    const raw = fs.readFileSync(svgPath, 'utf-8').replace(/^<\?xml[^>]*\?>\s*/, '');
     // Single <img> node per chart (instead of thousands of inline SVG nodes)
     // keeps the page paintable with 250+ charts; data URI keeps it self-contained.
+    if (raw.length > RASTER_THRESHOLD) {
+        if (rasterOK === null) {
+            const probe = rasterizeToPngDataUri(svgPath);
+            rasterOK = probe !== null;
+            if (probe) return `<img alt="" loading="lazy" decoding="async" src="${probe}">`;
+            console.warn(`WARNING: ${RSVG} unavailable — heavy charts stay as SVG; page may exceed 16 MB. Set RSVG=/path/to/rsvg-convert.`);
+        } else if (rasterOK) {
+            const uri = rasterizeToPngDataUri(svgPath);
+            if (uri) return `<img alt="" loading="lazy" decoding="async" src="${uri}">`;
+        }
+    }
     return `<img alt="" loading="lazy" decoding="async" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(raw)}">`;
 };
 const fmt = (n) => (Math.round(n * 100) / 100).toString();
@@ -181,7 +218,7 @@ for (const c of manifest.charts) {
 }
 
 const html = `<meta charset="utf-8">
-<title>Distractor Lab — FAA Wildlife Strikes</title>
+<title>Distractor Lab — ${esc(SESSION)}</title>
 <style>
 :root {
   --paper: #FAFAF8; --panel: #FFFFFF; --ink: #23262B; --ink-2: #5A6068; --ink-3: #8B9199;
@@ -349,7 +386,7 @@ dialog.quiz::backdrop { background: rgba(10, 12, 16, 0.55); }
 
 <div class="wrap">
 <header class="page-head">
-  <h1>Distractor Lab — chart-recognition quiz over Nic’s FAA Wildlife Strikes analysis</h1>
+  <h1>Distractor Lab — chart-recognition quiz over the ${esc(SESSION)} analysis</h1>
   <p class="sub">Five methods make the wrong answers for the question “which chart did you see?”.
   Each method operates on each chart in the study session. Data Formulator’s own chart pipeline (Flint)
   compiles and renders each lure. Therefore each lure looks like the charts that the participant made.
@@ -574,4 +611,5 @@ document.getElementById('quizClose').addEventListener('click', () => dlg.close()
 
 fs.writeFileSync(htmlPath, html);
 const mb = (fs.statSync(htmlPath).size / 1024 / 1024).toFixed(2);
-console.log(`gallery → ${htmlPath} (${mb} MB, ${manifest.charts.length} charts, ${totalLures} lures)`);
+console.log(`gallery → ${htmlPath} (${mb} MB, ${manifest.charts.length} charts, ${totalLures} lures, ${rasterCount} heavy charts rasterized)`);
+if (mb > 16) console.warn(`WARNING: ${mb} MB exceeds the 16 MB artifact limit.`);
