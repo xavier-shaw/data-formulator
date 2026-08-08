@@ -24,11 +24,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { loadSession, compileToVegaLite } from './lib';
-import { generateAll, chartRoles, DistractorCandidate, Method } from './generators';
-import { specDiff, specDistance, dataDistance, mergeEdits, displayedOrder, kendallTauDistance, EDIT_COSTS } from './distance';
+import {
+    loadSession, compileToVegaLite,
+    generateAll, chartRoles, DistractorCandidate, Method,
+    specDiff, specDistance, dataDistance, mergeEdits, displayedOrder, kendallTauDistance, EDIT_COSTS,
+    renderHash, degenerateText, installSeededRandom,
+} from './lib';
 
 const [statePath, outDir, vl2svgArg] = process.argv.slice(2);
 if (!statePath || !outDir) {
@@ -45,22 +47,13 @@ if (!fs.existsSync(VL2SVG)) {
 }
 
 // ── determinism ──────────────────────────────────────────────────────────
-// Flint's recommender picks at random among equally-good fields
-// (core/recommendation.ts uses Math.random in pickBestGroupingField and
-// friends). That is good variety for the app and wrong for a study
-// instrument: the same session must always yield the same quiz items, or the
-// items cannot be reproduced, audited, or counterbalanced. Seed the generator
-// for the whole run; override with DISTRACTOR_SEED to sample a different set.
+// See src/lib/quiz-distractors/seeded.ts for why this is necessary. This
+// process installs the seeded stream once and keeps it for the whole run:
+// generation here is interleaved with async rendering, and nothing else in the
+// process draws random numbers, so one continuous stream is both safe and what
+// keeps successive runs identical. Override with DISTRACTOR_SEED.
 const SEED = Number(process.env.DISTRACTOR_SEED ?? 20260807);
-Math.random = (() => {
-    let a = SEED >>> 0;
-    return () => {
-        a = (a + 0x6D2B79F5) >>> 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-})();
+installSeededRandom(SEED);
 
 const session = loadSession(statePath);
 console.log(`session: ${session.charts.length} charts, ${Object.keys(session.tables).length} tables (seed ${SEED})`);
@@ -106,35 +99,9 @@ async function renderAll(jobs: { spec: any; id: string }[], concurrency = 8): Pr
     return results;
 }
 
-/**
- * Hash of what the viewer actually sees. Normalizes away Vega's
- * non-semantic churn (whitespace, float formatting jitter) so two charts are
- * "the same" only when they truly look the same.
- */
-/**
- * Does the rendered chart show broken text — NaN, undefined, null in an axis
- * or data label? Such a lure compiles and renders, so the identity guard keeps
- * it, but it is *visibly* broken: a participant can eliminate it on sight,
- * which inflates recognition accuracy. Originals never contain these tokens,
- * so their presence is an unambiguous defect signal.
- */
-function degenerateText(svg: string): string[] {
-    const BAD = new Set(['NaN', 'undefined', 'null', 'Infinity', '-Infinity']);
-    const hits = new Set<string>();
-    for (const m of svg.matchAll(/>([^<>]*)</g)) {
-        const t = m[1].trim();
-        if (BAD.has(t)) hits.add(t);
-    }
-    return [...hits];
-}
-
-function renderHash(svg: string): string {
-    const normalized = svg
-        .replace(/\s+/g, ' ')
-        .replace(/(\d+\.\d{3})\d+/g, '$1')
-        .trim();
-    return crypto.createHash('sha1').update(normalized).digest('hex');
-}
+// `renderHash` and `degenerateText` now come from the shared library
+// (src/lib/quiz-distractors/guard.ts) so the app's in-session quiz applies the
+// exact same two rejection rules to the exact same normalized SVG.
 
 // ── main ─────────────────────────────────────────────────────────────────
 
