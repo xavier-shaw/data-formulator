@@ -18,8 +18,8 @@
  */
 
 import {
-    extractSession, buildQuizItems, verifyQuizItems,
-    QuizItem, SkippedChart, DEFAULT_SEED,
+    extractSession, buildQuizItems, verifyQuizItems, buildAuthorViewForChart,
+    QuizItem, SkippedChart, AuthoredChart, DEFAULT_SEED,
 } from '../lib/quiz-distractors';
 import { renderVegaLiteToSvg } from './vegaRender';
 import { loadWorkspace } from './workspaceService';
@@ -30,6 +30,12 @@ export interface GeneratedQuiz {
     seed: number;
     items: QuizItem[];
     skipped: SkippedChart[];
+    /**
+     * Every chart considered, in focus-time order — including the ones the quiz
+     * did not ask about. Author mode lists these, since inspecting a chart's
+     * look-alikes is worthwhile even when the quiz refused to use them.
+     */
+    ranked: { chartId: string; title: string; focusMs: number }[];
     /** how many charts the session offered before selection */
     chartsConsidered: number;
     /** invariant violations; non-empty means something is wrong with the set */
@@ -77,35 +83,44 @@ function thawRows(state: any): any {
     };
 }
 
-export async function generateQuizForSession(args: GenerateQuizArgs): Promise<GeneratedQuiz> {
-    const { sessionId, sessionName, liveState, topN = 12, seed = DEFAULT_SEED, onProgress } = args;
-
+/**
+ * The session's charts, from live state when it is the open session and from
+ * storage otherwise. Reading a stored session is a pure read — it does not
+ * switch the user's active session.
+ */
+async function resolveSession(sessionId: string, liveState: unknown) {
     let stateLike: any = liveState;
     if (!stateLike) {
-        // A different session than the one open: read its stored state. This is
-        // a pure read — it does not switch the user's active session.
         const loaded = await loadWorkspace(sessionId);
         if (!loaded?.state) {
             throw new Error('This session could not be read, so no quiz can be made from it.');
         }
         stateLike = loaded.state;
     }
+    return extractSession(thawRows(stateLike));
+}
 
-    const session = extractSession(thawRows(stateLike));
+/** Render a spec, reporting a failure rather than throwing: a chart that will
+ *  not render is simply not offered. */
+const renderOrNull = (vlSpec: any, id: string) =>
+    renderVegaLiteToSvg(vlSpec).catch((e) => {
+        console.warn(`[quiz] chart did not render (${id}): ${e?.message}`);
+        return null;
+    });
+
+export async function generateQuizForSession(args: GenerateQuizArgs): Promise<GeneratedQuiz> {
+    const { sessionId, sessionName, liveState, topN = 12, seed = DEFAULT_SEED, onProgress } = args;
+
+    const session = await resolveSession(sessionId, liveState);
     if (session.charts.length === 0) {
         throw new Error('This session has no charts to ask about.');
     }
 
-    const { items, skipped } = await buildQuizItems({
+    const { items, skipped, ranked } = await buildQuizItems({
         session,
         topN,
         seed,
-        render: (vlSpec, id) => renderVegaLiteToSvg(vlSpec).catch((e) => {
-            // A candidate that will not render is simply not offered; log it so
-            // a systematic failure (rather than one odd spec) is visible.
-            console.warn(`[quiz] chart did not render (${id}): ${e?.message}`);
-            return null;
-        }),
+        render: renderOrNull,
         onProgress,
         yieldToUi,
     });
@@ -126,12 +141,35 @@ export async function generateQuizForSession(args: GenerateQuizArgs): Promise<Ge
         seed,
         items,
         skipped,
+        ranked,
         chartsConsidered: session.charts.length,
         // Render hashes are not comparable to the offline pipeline's (browser
         // vega and node vl2svg measure text differently), so the meaningful
         // check here is the invariants, not a count match.
         problems: verifyQuizItems(items),
     };
+}
+
+// ── author mode ──────────────────────────────────────────────────────────
+
+export interface AuthorViewArgs {
+    sessionId: string;
+    liveState?: unknown;
+    chartId: string;
+    seed?: number;
+}
+
+/**
+ * Build the author view for a single chart: every method's look-alikes with the
+ * operations behind them. One chart at a time, on demand — rendering a whole
+ * session's methods at once is hundreds of charts and would stall the panel.
+ */
+export async function authorViewForChart(args: AuthorViewArgs): Promise<AuthoredChart | null> {
+    const { sessionId, liveState, chartId, seed = DEFAULT_SEED } = args;
+    const session = await resolveSession(sessionId, liveState);
+    const chart = session.charts.find(c => c.id === chartId);
+    if (!chart) return null;
+    return buildAuthorViewForChart(chart, session, renderOrNull, { seed });
 }
 
 // ── answer recording ─────────────────────────────────────────────────────

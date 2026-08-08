@@ -239,6 +239,140 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
     return { items, skipped, ranked };
 }
 
+// ── author view ──────────────────────────────────────────────────────────
+
+/**
+ * One look-alike as the author view shows it: the render plus the reasoning —
+ * which method made it, what it changed, and how far that moved it.
+ */
+export interface AuthoredLure {
+    id: string;
+    svg: string;
+    method: Method;
+    label: string;
+    rationale: string;
+    chartType: string;
+    /** the atomic spec edits, each with its cost */
+    edits: { op: string; detail: string; cost: number }[];
+    specDist: number;
+    dataDist: number;
+    /** rank / magnitude / label / order breakdown behind dataDist */
+    dataDetail: DataDistance;
+    /** set when the rows differ from the original's */
+    dataEditNote?: string;
+    /** set when the participant also saw a version of this chart */
+    caveat?: string;
+    /** would the quiz be allowed to use this lure? */
+    quizEligible: boolean;
+}
+
+export interface AuthoredChart {
+    chartId: string;
+    title: string;
+    chartType: string;
+    focusMs: number;
+    originalSvg: string;
+    /** every kept look-alike, grouped by the method that made it */
+    byMethod: { method: Method; lures: AuthoredLure[] }[];
+    /** candidates rejected by the render guard, with the reason */
+    rejected: { method: Method; label: string; reason: string }[];
+}
+
+/** Per-method cap in the author view — enough to show a method's range. */
+export const AUTHOR_PER_METHOD = 5;
+
+/** Spread a method's candidates across its distance range instead of taking the nearest N. */
+function spreadAcrossRange<T extends { specDist: number; dataDist: number }>(cands: T[], n: number): T[] {
+    if (cands.length <= n) return cands;
+    const sorted = [...cands].sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist));
+    const picked: T[] = [];
+    for (let i = 0; i < n; i++) picked.push(sorted[Math.round(i * (sorted.length - 1) / (n - 1))]);
+    return [...new Set(picked)];
+}
+
+/**
+ * Build the author view for ONE chart: every method's look-alikes, with the
+ * operations each performed and the distances they produced.
+ *
+ * Deliberately per-chart and therefore lazy — rendering every method's output
+ * for a whole session is hundreds of charts, so a panel should ask for one
+ * chart at a time rather than freezing while it renders them all.
+ *
+ * Unlike the quiz this keeps methods the quiz bars and charts the quiz skips:
+ * the point is to inspect what the generators do, so a lure the quiz would
+ * refuse is still worth seeing — flagged with `quizEligible: false`.
+ */
+export async function buildAuthorViewForChart(
+    chart: SessionChart,
+    session: SessionData,
+    render: RenderSvg,
+    opts: { seed?: number; perMethod?: number } = {},
+): Promise<AuthoredChart | null> {
+    const { seed = DEFAULT_SEED, perMethod = AUTHOR_PER_METHOD } = opts;
+
+    const candidates = withSeededRandom(seed, () => generateAll(chart, session));
+    const scored = scoreCandidates(chart, candidates);
+
+    const originalSvg = await render(compileToVegaLite(chart.spec, chart.rows, chart.metadata), `${chart.id}_orig`);
+    if (!originalSvg) return null;
+    const origHash = renderHash(originalSvg);
+
+    // Group first, then spread within each method, so a method with a narrow
+    // range still gets shown rather than being crowded out by a broader one.
+    const groups = new Map<Method, ScoredCandidate[]>();
+    for (const c of scored) {
+        if (!groups.has(c.method)) groups.set(c.method, []);
+        groups.get(c.method)!.push(c);
+    }
+
+    const byMethod: AuthoredChart['byMethod'] = [];
+    const rejected: AuthoredChart['rejected'] = [];
+    let n = 0;
+
+    for (const [method, cands] of groups) {
+        const lures: AuthoredLure[] = [];
+        for (const cand of spreadAcrossRange(cands, perMethod)) {
+            let svg: string | null = null;
+            try {
+                svg = await render(compileToVegaLite(cand.spec, cand.rows, cand.metadata), `${chart.id}_a${n++}`);
+            } catch { svg = null; }
+            if (!svg) { rejected.push({ method, label: cand.label, reason: 'did not render' }); continue; }
+            const broken = degenerateText(svg);
+            if (broken.length) { rejected.push({ method, label: cand.label, reason: `drew ${broken.join('/')}` }); continue; }
+            if (renderHash(svg) === origHash) {
+                rejected.push({ method, label: cand.label, reason: 'renders the same as the original' });
+                continue;
+            }
+            lures.push({
+                id: `${chart.id}_a${n}`,
+                svg,
+                method: cand.method,
+                label: cand.label,
+                rationale: cand.rationale,
+                chartType: cand.spec.chartType,
+                edits: cand.edits.map(e => ({ op: e.op, detail: e.detail, cost: e.cost })),
+                specDist: cand.specDist,
+                dataDist: cand.dataDist,
+                dataDetail: cand.dataDetail,
+                dataEditNote: cand.dataEditNote,
+                caveat: cand.caveat,
+                quizEligible: !QUIZ_EXCLUDE_METHODS.has(cand.method) && !cand.caveat,
+            });
+        }
+        if (lures.length) byMethod.push({ method, lures });
+    }
+
+    return {
+        chartId: chart.id,
+        title: chart.title,
+        chartType: chart.spec.chartType,
+        focusMs: chart.focusMs ?? 0,
+        originalSvg,
+        byMethod,
+        rejected,
+    };
+}
+
 /**
  * Invariants every assembled item must satisfy. Returns human-readable
  * violations; an empty array means the set is sound. Cheap enough to assert at

@@ -54,7 +54,6 @@ import LinkOffOutlinedIcon from '@mui/icons-material/LinkOffOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import QuizOutlinedIcon from '@mui/icons-material/QuizOutlined';
-import { QuizDialog } from './QuizDialog';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -169,7 +168,9 @@ export const DataSourceSidebar: React.FC<{
     connectorRefreshKey?: number;
     onConnectorsChanged?: () => void;
     onStartDataLoadingChat?: (text: string) => void;
-}> = ({ onOpenUploadDialog, connectorRefreshKey = 0, onConnectorsChanged, onStartDataLoadingChat }) => {
+    /** open the chart-memory panel for a session (rendered by DataFormulator) */
+    onOpenQuiz?: (sessionId: string, sessionName: string) => void;
+}> = ({ onOpenUploadDialog, connectorRefreshKey = 0, onConnectorsChanged, onStartDataLoadingChat, onOpenQuiz }) => {
     const { t } = useTranslation();
     const dispatch = useDispatch<AppDispatch>();
 
@@ -360,6 +361,7 @@ export const DataSourceSidebar: React.FC<{
                     onConnectorsChanged={onConnectorsChanged}
                     disableConnectors={disableConnectors}
                     onStartDataLoadingChat={onStartDataLoadingChat}
+                    onOpenQuiz={onOpenQuiz}
                 />
             )}
 
@@ -385,26 +387,12 @@ const DataSourceSidebarPanel: React.FC<{
     onConnectorsChanged?: () => void;
     disableConnectors?: boolean;
     onStartDataLoadingChat?: (text: string) => void;
-}> = ({ panelWidth, onOpenUploadDialog, onCollapse, connectorRefreshKey = 0, onConnectorsChanged, disableConnectors = false, onStartDataLoadingChat }) => {
+    onOpenQuiz?: (sessionId: string, sessionName: string) => void;
+}> = ({ panelWidth, onOpenUploadDialog, onCollapse, connectorRefreshKey = 0, onConnectorsChanged, disableConnectors = false, onStartDataLoadingChat, onOpenQuiz }) => {
     const { t } = useTranslation();
     const dispatch = useDispatch<AppDispatch>();
 
     const activeWorkspace = useSelector((state: DataFormulatorState) => state.activeWorkspace);
-
-    // Which session the recognition quiz is open for (null = closed).
-    const [quizTarget, setQuizTarget] = useState<{ id: string; name: string } | null>(null);
-    // Slices the quiz reads. For the ACTIVE session these are preferred over the
-    // stored copy: autosave lags, and the focus time of the chart being viewed
-    // right now is still accumulating here. Selected individually so the sidebar
-    // does not re-render on unrelated state changes.
-    const quizCharts = useSelector((state: DataFormulatorState) => state.charts);
-    const quizTables = useSelector((state: DataFormulatorState) => state.tables);
-    const quizConcepts = useSelector((state: DataFormulatorState) => state.conceptShelfItems);
-    const quizUsage = useSelector((state: DataFormulatorState) => state.chartUsage);
-    const quizLiveState = useMemo(
-        () => ({ charts: quizCharts, tables: quizTables, conceptShelfItems: quizConcepts, chartUsage: quizUsage }),
-        [quizCharts, quizTables, quizConcepts, quizUsage],
-    );
 
     const identityKey = useSelector(
         (state: DataFormulatorState) => `${state.identity.type}:${state.identity.id}`,
@@ -2253,7 +2241,7 @@ const DataSourceSidebarPanel: React.FC<{
                                     <Tooltip title={t('sidebar.quizSession', { defaultValue: 'Memory quiz — which charts do you remember?' })}>
                                         <IconButton
                                             size="small"
-                                            onClick={(e) => { e.stopPropagation(); setQuizTarget({ id: s.id, name: s.display_name }); }}
+                                            onClick={(e) => { e.stopPropagation(); onOpenQuiz?.(s.id, s.display_name); }}
                                             sx={{ p: 0.25, color: 'text.disabled', '&:hover': { color: 'primary.main' } }}
                                         >
                                             <QuizOutlinedIcon sx={{ fontSize: 14 }} />
@@ -2303,19 +2291,6 @@ const DataSourceSidebarPanel: React.FC<{
                 </Box>
                 <KnowledgePanel />
             </Box>
-            )}
-
-            {/* Chart-recognition quiz. Mounted only while open so generation
-                starts on click, and the live slices are handed over only for the
-                active session — any other session is read from storage. */}
-            {quizTarget && (
-                <QuizDialog
-                    open
-                    onClose={() => setQuizTarget(null)}
-                    sessionId={quizTarget.id}
-                    sessionName={quizTarget.name}
-                    liveState={activeWorkspace?.id === quizTarget.id ? quizLiveState : undefined}
-                />
             )}
 
             {/* Preview popover */}
