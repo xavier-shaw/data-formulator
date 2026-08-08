@@ -45,6 +45,11 @@ interface QuizPanelProps {
     sessionName: string;
     /** live Redux slices, passed when the panel targets the active session */
     liveState?: unknown;
+    /**
+     * How much room there is. `page` (the default) centres the content and lets
+     * charts grow; `narrow` keeps everything compact for a docked column.
+     */
+    layout?: 'page' | 'narrow';
     onClose: () => void;
 }
 
@@ -83,9 +88,16 @@ function shuffledOptions(item: QuizItem): QuizOption[] {
 
 const secs = (ms: number) => Math.round(ms / 1000);
 
-export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveState, onClose }) => {
+export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveState, layout = 'page', onClose }) => {
     const { t } = useTranslation();
     const theme = useTheme();
+
+    // One place to tune for the two widths, so the JSX stays free of
+    // layout conditionals.
+    const wide = layout === 'page';
+    const size = wide
+        ? { maxW: 1240, optionCols: '1fr 1fr', optionH: 380, optionMin: 300, lureCols: 'repeat(auto-fill, minmax(300px, 1fr))', lureH: 260, pad: 2.5 }
+        : { maxW: 'none', optionCols: '1fr 1fr', optionH: 200, optionMin: 130, lureCols: '1fr 1fr', lureH: 190, pad: 1.5 };
 
     const [mode, setMode] = useState<'quiz' | 'author'>('quiz');
 
@@ -238,10 +250,10 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 onClick={() => handlePick(opt.id)}
                 sx={{ p: 0.75, background: '#fff', cursor: picked ? 'default' : 'pointer',
                       border: `2px solid ${bc}`, boxShadow: sh, borderRadius: radius.sm,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 130,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: size.optionMin,
                       '&:hover': picked ? {} : { borderColor: theme.palette.primary.main } }}
             >
-                <img src={svgUri(opt.svg)} alt="" style={{ maxWidth: '100%', maxHeight: 200, height: 'auto' }} />
+                <img src={svgUri(opt.svg)} alt="" style={{ maxWidth: '100%', maxHeight: size.optionH, height: 'auto' }} />
             </Box>
         );
     };
@@ -330,7 +342,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                     {t('quiz.questionPrompt', { seconds: secs(item!.focusMs),
                         defaultValue: `Which of these did you make? You spent about ${secs(item!.focusMs)}s on it.` })}
                 </Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: size.optionCols, gap: wide ? 2 : 1 }}>
                     {options.map(optionCard)}
                 </Box>
                 <Typography sx={{ fontSize: 12, mt: 1, minHeight: 32, color: gotIt ? 'success.main' : 'error.main' }}>
@@ -356,7 +368,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         <Box key={lure.id} sx={{ border: `1px solid ${borderColor.view}`,
                 borderTop: `3px solid ${METHOD_COLOR[lure.method]}`,
                 borderRadius: radius.sm, p: 0.75, background: '#fff', opacity: lure.quizEligible ? 1 : 0.75 }}>
-            <img src={svgUri(lure.svg)} alt="" style={{ maxWidth: '100%', maxHeight: 190, height: 'auto', display: 'block', margin: '0 auto' }} />
+            <img src={svgUri(lure.svg)} alt="" style={{ maxWidth: '100%', maxHeight: size.lureH, height: 'auto', display: 'block', margin: '0 auto' }} />
             <Typography sx={{ fontSize: 11.5, mt: 0.5, fontWeight: 500 }}>{lure.label}</Typography>
             <Box sx={{ display: 'flex', gap: 1, mt: 0.25, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10.5, color: 'text.secondary' }}>
                 <span>{t('quiz.form', { defaultValue: 'form' })} <b>{lure.specDist}</b></span>
@@ -451,7 +463,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                                 </Typography>
                                                 <Box sx={{ border: `2px solid ${theme.palette.primary.main}`, borderRadius: radius.sm, p: 0.75, background: '#fff' }}>
                                                     <img src={svgUri(state.originalSvg)} alt=""
-                                                        style={{ maxWidth: '100%', maxHeight: 210, height: 'auto', display: 'block', margin: '0 auto' }} />
+                                                        style={{ maxWidth: '100%', maxHeight: wide ? 320 : 210, height: 'auto', display: 'block', margin: '0 auto' }} />
                                                 </Box>
                                             </Box>
                                             {state.byMethod.map(group => (
@@ -460,7 +472,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                                         color: METHOD_COLOR[group.method], mb: 0.5 }}>
                                                         {METHOD_LABEL[group.method]} · {group.lures.length}
                                                     </Typography>
-                                                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                                                    <Box sx={{ display: 'grid', gridTemplateColumns: size.lureCols, gap: 1 }}>
                                                         {group.lures.map(lureCard)}
                                                     </Box>
                                                 </Box>
@@ -489,9 +501,11 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             {header}
             {tabs}
             <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-                {error
-                    ? <Box sx={{ p: 2 }}><Typography sx={{ fontSize: 13, color: 'error.main' }}>{error}</Typography></Box>
-                    : mode === 'quiz' ? quizBody() : authorBody()}
+                <Box sx={{ maxWidth: size.maxW, mx: 'auto', width: '100%' }}>
+                    {error
+                        ? <Box sx={{ p: 2 }}><Typography sx={{ fontSize: 13, color: 'error.main' }}>{error}</Typography></Box>
+                        : mode === 'quiz' ? quizBody() : authorBody()}
+                </Box>
             </Box>
         </Box>
     );

@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { DataSourceSidebar } from '../../../../src/views/DataSourceSidebar';
 import { apiRequest } from '../../../../src/app/apiClient';
 
@@ -119,7 +120,7 @@ describe('DataSourceSidebar', () => {
             return Promise.resolve({ data: {} });
         });
 
-        render(<DataSourceSidebar />);
+        render(<MemoryRouter><DataSourceSidebar /></MemoryRouter>);
 
         fireEvent.click(await screen.findByText('Warehouse'));
 

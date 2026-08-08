@@ -85,6 +85,7 @@ import {
 } from "react-router-dom";
 import { About } from '../views/About';
 import ChartGallery from '../gallery/ChartGallery';
+import { ChartMemoryPage } from '../views/ChartMemoryPage';
 import { MessageSnackbar } from '../views/MessageSnackbar';
 import { ChartRenderService } from '../views/ChartRenderService';
 import { DictTable } from '../components/ComponentType';
@@ -819,6 +820,7 @@ const AppShell: FC = () => {
 
     const isAboutPage = location.pathname === '/about';
     const isGalleryPage = location.pathname === '/gallery';
+    const isChartMemoryPage = location.pathname === '/chart-memory';
     const isAppPage = !isAboutPage && !isGalleryPage;
 
     return (
@@ -872,6 +874,7 @@ const AppShell: FC = () => {
                             <TopNavButton to="/about" label={t('appBar.about')} selected={isAboutPage} />
                             <TopNavButton to="/app" label={t('appBar.app')} selected={isAppPage} />
                             <TopNavButton to="/gallery" label={t('appBar.gallery')} selected={isGalleryPage} />
+                            <TopNavButton to="/chart-memory" label={t('appBar.chartMemory')} selected={isChartMemoryPage} />
                         </Box>
                         {tables.length === 0 && !activeWorkspace && (
                             <Typography noWrap sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontWeight: 500, fontSize: '0.65rem', color: 'text.secondary', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
@@ -1287,6 +1290,13 @@ export const AppFC: FC<AppFCProps> = function AppFC(appProps) {
                 {
                     path: "gallery",
                     element: <ChartGallery />,
+                },
+                {
+                    // Full-width so the quiz can show four charts side by side
+                    // and author mode a method's whole range. Takes the session
+                    // from ?session=&name=, defaulting to the open one.
+                    path: "chart-memory",
+                    element: <ChartMemoryPage />,
                 },
                 {
                     path: "*",

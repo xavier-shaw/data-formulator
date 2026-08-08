@@ -10,6 +10,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import {
@@ -168,9 +169,7 @@ export const DataSourceSidebar: React.FC<{
     connectorRefreshKey?: number;
     onConnectorsChanged?: () => void;
     onStartDataLoadingChat?: (text: string) => void;
-    /** open the chart-memory panel for a session (rendered by DataFormulator) */
-    onOpenQuiz?: (sessionId: string, sessionName: string) => void;
-}> = ({ onOpenUploadDialog, connectorRefreshKey = 0, onConnectorsChanged, onStartDataLoadingChat, onOpenQuiz }) => {
+}> = ({ onOpenUploadDialog, connectorRefreshKey = 0, onConnectorsChanged, onStartDataLoadingChat }) => {
     const { t } = useTranslation();
     const dispatch = useDispatch<AppDispatch>();
 
@@ -361,7 +360,6 @@ export const DataSourceSidebar: React.FC<{
                     onConnectorsChanged={onConnectorsChanged}
                     disableConnectors={disableConnectors}
                     onStartDataLoadingChat={onStartDataLoadingChat}
-                    onOpenQuiz={onOpenQuiz}
                 />
             )}
 
@@ -387,10 +385,16 @@ const DataSourceSidebarPanel: React.FC<{
     onConnectorsChanged?: () => void;
     disableConnectors?: boolean;
     onStartDataLoadingChat?: (text: string) => void;
-    onOpenQuiz?: (sessionId: string, sessionName: string) => void;
-}> = ({ panelWidth, onOpenUploadDialog, onCollapse, connectorRefreshKey = 0, onConnectorsChanged, disableConnectors = false, onStartDataLoadingChat, onOpenQuiz }) => {
+}> = ({ panelWidth, onOpenUploadDialog, onCollapse, connectorRefreshKey = 0, onConnectorsChanged, disableConnectors = false, onStartDataLoadingChat }) => {
     const { t } = useTranslation();
     const dispatch = useDispatch<AppDispatch>();
+    const navigate = useNavigate();
+
+    /** Open the chart-memory page for a session. A page, not a pane: the quiz
+     *  shows four charts at once and needs the width. */
+    const openChartMemory = useCallback((sessionId: string, sessionName: string) => {
+        navigate(`/chart-memory?session=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(sessionName)}`);
+    }, [navigate]);
 
     const activeWorkspace = useSelector((state: DataFormulatorState) => state.activeWorkspace);
 
@@ -2241,7 +2245,7 @@ const DataSourceSidebarPanel: React.FC<{
                                     <Tooltip title={t('sidebar.quizSession', { defaultValue: 'Memory quiz — which charts do you remember?' })}>
                                         <IconButton
                                             size="small"
-                                            onClick={(e) => { e.stopPropagation(); onOpenQuiz?.(s.id, s.display_name); }}
+                                            onClick={(e) => { e.stopPropagation(); openChartMemory(s.id, s.display_name); }}
                                             sx={{ p: 0.25, color: 'text.disabled', '&:hover': { color: 'primary.main' } }}
                                         >
                                             <QuizOutlinedIcon sx={{ fontSize: 14 }} />
