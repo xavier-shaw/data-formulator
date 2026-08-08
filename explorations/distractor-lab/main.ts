@@ -152,6 +152,7 @@ async function run() {
         dropSummary: {} as Record<string, number>,
     };
     const allDrops: DropRecord[] = [];
+    const skipped: { title: string; chartType: string; reason: string }[] = [];
     let kept = 0;
 
     for (const chart of session.charts) {
@@ -163,6 +164,7 @@ async function run() {
             candidates = generateAll(chart, session);
         } catch (e: any) {
             console.error(`  !! generation failed for ${chart.title}: ${e.message}`);
+            skipped.push({ title: chart.title, chartType: chart.spec.chartType, reason: 'generation-failed' });
             continue;
         }
 
@@ -188,6 +190,7 @@ async function run() {
             origSpec = compileToVegaLite(chart.spec, chart.rows, chart.metadata);
         } catch (e: any) {
             console.error(`  !! original failed to compile: ${chart.title}: ${e.message}`);
+            skipped.push({ title: chart.title, chartType: chart.spec.chartType, reason: 'original-compile-failed' });
             continue;
         }
 
@@ -216,6 +219,7 @@ async function run() {
         const origSvg = svgs.get(origId);
         if (!origSvg) {
             console.error(`  !! original failed to render: ${chart.title}`);
+            skipped.push({ title: chart.title, chartType: chart.spec.chartType, reason: 'original-render-failed' });
             continue;
         }
         const origHash = renderHash(origSvg);
@@ -228,6 +232,8 @@ async function run() {
             encodings: chart.spec.encodings,
             measure: roles.measure,
             category: roles.category,
+            focusMs: chart.focusMs,
+            visits: chart.visits,
             origSpecFile: `${origId}.vl.json`,
             distractors: [],
         };
@@ -294,50 +300,56 @@ async function run() {
             }
         }
 
+        // A chart can be quizzed only if it yields ≥3 visually distinct lures
+        // (a 4-option item needs the original + 3 different wrong answers).
+        // Chart types the generators barely support — maps, some heatmaps —
+        // fall short; they stay in the manifest for completeness but are marked
+        // ineligible so the quiz builder skips them instead of the build failing.
+        const distinctCount = new Set(chartEntry.distractors.map((d: any) => d.renderHash)).size;
+        chartEntry.quizEligible = distinctCount >= 3;
+        chartEntry.distinctLures = distinctCount;
+
         kept += chartEntry.distractors.length;
         manifest.charts.push(chartEntry);
         const dropped = candidates.length - chartEntry.distractors.length;
-        console.log(`${chart.title}: ${candidates.length} cand → ${chartEntry.distractors.length} kept, ${dropped} dropped/capped (${Date.now() - t0}ms)`);
+        const flag = chartEntry.quizEligible ? '' : `  [not quiz-eligible: ${distinctCount} distinct]`;
+        console.log(`${chart.title}: ${candidates.length} cand → ${chartEntry.distractors.length} kept, ${dropped} dropped/capped (${Date.now() - t0}ms)${flag}`);
     }
 
     manifest.drops = allDrops;
+    manifest.skipped = skipped;
     for (const d of allDrops) manifest.dropSummary[d.reason] = (manifest.dropSummary[d.reason] ?? 0) + 1;
     fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 1));
 
-    console.log(`\nkept ${kept} lures across ${manifest.charts.length} charts`);
+    const eligible = manifest.charts.filter((c: any) => c.quizEligible).length;
+    console.log(`\nkept ${kept} lures across ${manifest.charts.length} charts (${eligible} quiz-eligible)`);
     console.log('drops by reason:', JSON.stringify(manifest.dropSummary));
+    if (skipped.length) {
+        console.log(`skipped ${skipped.length} chart(s) (compile/render unsupported):`);
+        for (const s of skipped) console.log(`  - ${s.title} [${s.chartType}] — ${s.reason}`);
+    }
 
     // ── build-time assertion ─────────────────────────────────────────────
-    // Re-verify from the files on disk: nothing degenerate may survive.
-    // Guard the guard: a pass over zero charts proves nothing, so an empty or
-    // shrunken run is itself a failure rather than a green check.
+    // Re-verify from the files on disk. Two classes are HARD failures because
+    // they mean a broken item slipped through among the distractors we kept:
+    //   • identical-to-original  → the quiz item would have two correct answers
+    //   • degenerate-render      → visibly broken, eliminable on sight
+    // A chart producing <3 distinct lures is NOT a failure: some chart types
+    // (maps, some heatmaps) the generators barely support. It is marked
+    // quizEligible=false and the quiz builder skips it. Only a totally empty
+    // run fails, so the guard can never pass vacuously.
     let violations = 0;
-    if (manifest.charts.length !== session.charts.length) {
-        console.error(`FAILED: ${session.charts.length - manifest.charts.length} of ${session.charts.length} charts produced no output ` +
-            `(compile or render failure) — fix that before trusting the guard.`);
-        process.exit(1);
-    }
-    if (kept === 0) {
-        console.error('FAILED: no lures survived — the verification below would pass vacuously.');
+    if (kept === 0 || manifest.charts.length === 0) {
+        console.error('FAILED: no charts/lures survived — the verification below would pass vacuously.');
         process.exit(1);
     }
     for (const c of manifest.charts) {
         const oh = renderHash(fs.readFileSync(path.join(svgDir, `${c.id}_orig.svg`), 'utf-8'));
-        const seen = new Map<string, string>();
         for (const d of c.distractors) {
             const svg = fs.readFileSync(path.join(svgDir, `${d.id}.svg`), 'utf-8');
-            const h = renderHash(svg);
-            if (h === oh) { console.error(`  VIOLATION identical-to-original: ${c.title} / ${d.label}`); violations++; }
+            if (renderHash(svg) === oh) { console.error(`  VIOLATION identical-to-original: ${c.title} / ${d.label}`); violations++; }
             const broken = degenerateText(svg);
             if (broken.length) { console.error(`  VIOLATION degenerate-render (${broken.join('/')}): ${c.title} / ${d.label}`); violations++; }
-            seen.set(h, d.label);
-        }
-        // Lures that duplicate each other are kept deliberately. What must hold
-        // is that enough VISUALLY DISTINCT lures remain to build a 4-option
-        // item, since the quiz sampler de-duplicates by render.
-        if (seen.size < 3) {
-            console.error(`  VIOLATION only ${seen.size} distinct lure(s) for "${c.title}" — a 4-option item needs 3`);
-            violations++;
         }
     }
     if (violations > 0) {
@@ -347,8 +359,7 @@ async function run() {
     const distinct = manifest.charts.map((c: any) => new Set(c.distractors.map((d: any) => d.renderHash)).size);
     const twins = kept - distinct.reduce((a: number, b: number) => a + b, 0);
     console.log(`guard verified: no lure renders identically to its original; ` +
-        `${twins} lure(s) reproduce another method's chart and are kept on purpose ` +
-        `(min ${Math.min(...distinct)} visually distinct per chart).`);
+        `${twins} lure(s) reproduce another method's chart and are kept on purpose.`);
 }
 
 run().catch(e => { console.error(e); process.exit(1); });

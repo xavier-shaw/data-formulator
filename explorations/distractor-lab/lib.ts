@@ -44,6 +44,10 @@ export interface SessionChart {
     spec: ChartLevelSpec;
     rows: any[];
     metadata: Record<string, FieldMeta>;
+    /** ms the chart held focus during the session (state.chartUsage); 0 if untracked */
+    focusMs: number;
+    /** number of times the chart was viewed */
+    visits: number;
 }
 
 export interface SessionData {
@@ -61,6 +65,10 @@ export function loadSession(statePath: string): SessionData {
 
     const conceptName: Record<string, string> = {};
     for (const c of s.conceptShelfItems ?? []) conceptName[c.id] = c.name;
+
+    // Per-chart viewing telemetry (chartUsageTelemetry.ts → state.chartUsage).
+    // Absent in older sessions; treat missing entries as never focused.
+    const usage: Record<string, { focusMs?: number; visits?: number }> = s.chartUsage ?? {};
 
     const tables: SessionData['tables'] = {};
     let sourceTable: SessionData['sourceTable'];
@@ -96,6 +104,8 @@ export function loadSession(statePath: string): SessionData {
             spec: { chartType: c.chartType, encodings, config: c.config ?? {} },
             rows: table.rows,
             metadata: table.metadata,
+            focusMs: usage[c.id]?.focusMs ?? 0,
+            visits: usage[c.id]?.visits ?? 0,
         });
     }
 

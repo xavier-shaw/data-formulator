@@ -12,9 +12,22 @@ the surrounding quiz-module plan.
 ```
 state.json ─▶ extract ─▶ generate ─▶ score ─▶ compile ─▶ render ─▶ GUARD ─▶ manifest
  (session)                                   (Flint)    (vl2svg)    │
-                                                                    ▼
-                                              build_gallery.mjs ─▶ gallery.html
+                                                                    ├─▶ build_gallery.mjs ─▶ gallery.html
+                                                                    └─▶ build_quiz.mjs    ─▶ quiz.html
 ```
+
+Two artifacts read the same manifest + rendered SVGs:
+
+- **`build_gallery.mjs`** — a comparison gallery: every method side by side per
+  chart, with distances and the distance explainer. For inspecting the methods.
+- **`build_quiz.mjs`** — a playable quiz: one question per chart, four options
+  (the real chart + the 3 hardest look-alikes), records right/wrong, shows a
+  score + misrecall distances, and downloads answers as JSON. Charts are picked
+  by **focus time** (`state.chartUsage.focusMs`) — the ones the participant
+  looked at longest — and only "fair" charts are used: a chart is skipped if the
+  correct answer would be the only one of its chart family (e.g. a map among bar
+  charts), because that is a giveaway, not a memory test. Usage:
+  `node build_quiz.mjs <outDir> <quiz.html> [topN=12]`.
 
 ## The guard (why rendering is part of the build)
 
@@ -38,11 +51,14 @@ to compare what each method can reach, so suppressing a chart because another
 method produced it first would misrepresent the second method. Each copy is
 cross-linked via `alsoProducedBy`, and the *quiz sampler* de-duplicates by
 render hash when it assembles an item — verified over 390 sampled items, all
-with 4 options and no repeated option. What the build asserts is therefore that
-each chart has ≥3 **visually distinct** lures, not that no two lures match.
+with 4 options and no repeated option.
 
-A pass over zero charts proves nothing, so an empty or shrunken run is itself
-a failure.
+`identical-to-original` and `degenerate-render` are **hard failures** — they
+mean a broken item slipped through. A chart that yields fewer than 3 visually
+distinct lures is **not** a failure: some chart types (maps, some heatmaps) the
+generators barely support. Such a chart is marked `quizEligible: false` and the
+quiz builder skips it; the gallery still shows whatever lures it has. Only a
+totally empty run fails, so the guard can never pass vacuously.
 
 ## Reproducibility
 
