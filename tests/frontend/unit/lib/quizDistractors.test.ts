@@ -8,7 +8,7 @@ import {
     renderHash,
     degenerateText,
     stripSvgText,
-    QUIZ_EXCLUDE_METHODS,
+    QUIZ_METHODS,
     chartFamily,
     LURES_PER_ITEM,
 } from '../../../../src/lib/quiz-distractors';
@@ -59,9 +59,16 @@ function makeState(overrides: Record<string, any> = {}) {
     };
 }
 
-/** Stand-in renderer: unique SVG text per spec, so hashes differ per chart. */
-const fakeRender = async (vlSpec: any) =>
-    `<svg><text>${JSON.stringify(vlSpec).length}:${JSON.stringify(vlSpec.encoding ?? vlSpec.mark ?? '')}</text></svg>`;
+/**
+ * Stand-in renderer. Like a real chart, the per-spec difference lives in the
+ * MARK, not only in the text — otherwise stripping the labels for step 1 would
+ * make every option identical and the guard would (rightly) reject them all.
+ */
+const fakeRender = async (vlSpec: any) => {
+    const sig = JSON.stringify(vlSpec);
+    return `<svg><path class="mark" data-sig="${sig.length}:${encodeURIComponent(sig).slice(0, 80)}" d="M0,0"/>`
+        + `<text>${sig.length}</text></svg>`;
+};
 
 describe('extractSession', () => {
     it('resolves field ids to names and carries focus telemetry', () => {
@@ -170,12 +177,24 @@ describe('buildQuizItems', () => {
         expect(verifyQuizItems(items)).toEqual([]);
     });
 
-    it('never uses an excluded method as a lure', async () => {
+    it('draws lures only from the allowed methods', async () => {
         const session = extractSession(makeState());
         const { items } = await buildQuizItems({ session, render: fakeRender });
         const methods = items.flatMap(i => i.options.map(o => o.method).filter(Boolean));
         expect(methods.length).toBeGreaterThan(0);
-        for (const m of methods) expect(QUIZ_EXCLUDE_METHODS.has(m as any)).toBe(false);
+        for (const m of methods) expect(QUIZ_METHODS.has(m as any)).toBe(true);
+    });
+
+    it('rejects a lure that only differs in text, since step 1 hides text', async () => {
+        const session = extractSession(makeState());
+        // Renderer whose output differs ONLY inside <text>: with labels the
+        // charts are distinct, with labels stripped they are identical, so no
+        // option may survive except by accident of another difference.
+        let n = 0;
+        const textOnlyRender = async () => `<svg><path d="M0,0"/><text>${n++}</text></svg>`;
+        const { items, skipped } = await buildQuizItems({ session, render: textOnlyRender });
+        expect(items).toHaveLength(0);
+        expect(skipped[0].reason).toMatch(/usable look-alike/);
     });
 
     it('drops a lure that renders like the original rather than shipping two right answers', async () => {
@@ -187,9 +206,31 @@ describe('buildQuizItems', () => {
         expect(skipped[0].reason).toMatch(/usable look-alike/);
     });
 
-    it('skips a chart whose lures are all a different family', async () => {
+    it('can ask about a chart type no other form reaches, because perturbation keeps the form', async () => {
         const session = extractSession(makeState());
-        // Force the correct answer into a family nothing else can reach.
+        // A map used to be skipped as a giveaway: the only lures available were
+        // bars and lines, so the one map on screen was obviously the answer.
+        // Data perturbation keeps the chart type and changes the values, so it
+        // supplies same-family lures and the question becomes fair.
+        session.charts[0].spec.chartType = 'US Map';
+        const { items } = await buildQuizItems({ session, render: fakeRender });
+        expect(items).toHaveLength(1);
+        // The options are a mix — the nearest lures are cheap form edits — but at
+        // least one keeps the map form, which is what makes the item fair.
+        const lures = items[0].options.filter(o => o.id !== items[0].correctId);
+        expect(lures.some(o => chartFamily(o.chartType) === chartFamily('US Map'))).toBe(true);
+    });
+
+    it('still skips a chart when no surviving lure shares its family', async () => {
+        // A constant measure leaves data perturbation nothing to change: every
+        // variant it computes is numerically identical, so all of them render
+        // like the original and are dropped. (The label-substitution variant
+        // needs a source table for its pool; this fixture has only a derived
+        // one.) What remains are cross-family form edits — the exact case the
+        // fairness rule exists to catch.
+        const flat = makeState();
+        flat.tables[0].rows = flat.tables[0].rows.map(r => ({ ...r, rate: 0.2 }));
+        const session = extractSession(flat);
         session.charts[0].spec.chartType = 'US Map';
         const { items, skipped } = await buildQuizItems({ session, render: fakeRender });
         expect(items).toHaveLength(0);

@@ -61,23 +61,42 @@ const METHOD_NAME = {
 
 // ── build the question set ────────────────────────────────────────────────
 
-// Methods the quiz must not draw distractors from. data-perturb keeps the exact
-// chart form and nudges values (spec 0, small data distance); the change is too
-// subtle to notice, so it makes trivially-missed "gotcha" items rather than a
-// real recognition test. It stays in the gallery (a method showcase) but is
-// barred from the quiz.
-const QUIZ_EXCLUDE_METHODS = new Set(['data-perturb']);
+// The methods the quiz may draw lures from, taken from the manifest so this
+// script cannot disagree with the library the app uses (see main.ts).
+if (!manifest.quizMethods) {
+    console.error('manifest has no quizMethods; re-run main.ts to regenerate it');
+    process.exit(1);
+}
+const QUIZ_METHODS = new Set(manifest.quizMethods);
 
 const secs = (ms) => Math.round((ms ?? 0) / 1000);
 
-/** pick the 3 hardest distractors: nearest by (spec+data), deduped by render */
+/**
+ * Pick the 3 hardest distractors, letting the methods take turns.
+ *
+ * Mirrors `interleaveByMethod` in src/lib/quiz-distractors/select.ts — see the
+ * comment there for why: ranking purely by distance gives every slot to
+ * data-perturb, so a question would probe only one kind of memory.
+ */
 function pickDistractors(chart) {
     const pool = (chart.distractors ?? [])
-        .filter(d => !d.caveat && !QUIZ_EXCLUDE_METHODS.has(d.method))
+        .filter(d => !d.caveat && QUIZ_METHODS.has(d.method))
         .sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist));
+
+    const queues = new Map();
+    for (const d of pool) {
+        if (!queues.has(d.method)) queues.set(d.method, []);
+        queues.get(d.method).push(d);
+    }
+    const lists = [...queues.values()];
+    const ordered = [];
+    for (let i = 0; ordered.length < pool.length; i++) {
+        for (const list of lists) if (i < list.length) ordered.push(list[i]);
+    }
+
     const seen = new Set();
     const out = [];
-    for (const d of pool) {
+    for (const d of ordered) {
         if (seen.has(d.renderHash)) continue;
         seen.add(d.renderHash);
         out.push(d);

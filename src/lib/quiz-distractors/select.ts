@@ -7,7 +7,7 @@
  * This is the one place the quiz's *judgement calls* live, so the in-app quiz
  * and the offline pipeline cannot drift apart on them:
  *
- *  • which methods may supply a lure at all (see QUIZ_EXCLUDE_METHODS)
+ *  • which methods may supply a lure at all (see QUIZ_METHODS)
  *  • which charts are fair to ask about (see the family rule below)
  *  • how many lures an item needs, and how hard they should be
  *
@@ -19,22 +19,32 @@
 import { SessionChart, SessionData, ChartLevelSpec, FieldMeta, compileToVegaLite } from './extract';
 import { generateAll, chartRoles, DistractorCandidate, Method } from './generators';
 import { SpecEdit, specDiff, specDistance, dataDistance, mergeEdits, DataDistance } from './distance';
-import { renderHash, degenerateText } from './guard';
+import { renderHash, degenerateText, stripSvgText } from './guard';
 import { withSeededRandom } from './seeded';
 
 /** Compile a chart-level spec and render it; returns the SVG string. */
 export type RenderSvg = (vlSpec: any, id: string) => Promise<string | null>;
 
 /**
- * Methods barred from supplying quiz lures.
+ * The only methods the quiz draws lures from.
  *
- * `data-perturb` keeps the exact chart form and nudges the values (spec
- * distance 0, data distance ~0.1). Empirically that is too subtle to notice —
- * every miss in a pilot run was one of these — so it produces gotcha items
- * rather than a memory test. The method stays available to the gallery, which
- * exists to showcase what each method can make.
+ * These two are what the two-step question is built to separate:
+ *
+ *   graphscape    changes the FORM and leaves the values alone, so it is caught
+ *                 (or missed) in step 1, where the text is hidden.
+ *   data-perturb  keeps the form exactly and changes the VALUES, so it shows up
+ *                 as a different shape in step 1 and different numbers in step 2.
+ *
+ * The other methods (enumeration, sibling-measure, session-hybrid) change form
+ * and content together, which muddies that split. They are still generated and
+ * remain visible in author mode — the quiz simply does not ask about them.
  */
-export const QUIZ_EXCLUDE_METHODS: ReadonlySet<Method> = new Set<Method>(['data-perturb']);
+export const QUIZ_METHODS: ReadonlySet<Method> = new Set<Method>(['graphscape', 'data-perturb']);
+
+/** @deprecated kept for readers of older manifests; prefer QUIZ_METHODS. */
+export const QUIZ_EXCLUDE_METHODS: ReadonlySet<Method> = new Set<Method>(
+    (['enumeration', 'sibling-measure', 'session-hybrid'] as Method[]),
+);
 
 /** How many distractors one item shows besides the correct answer. */
 export const LURES_PER_ITEM = 3;
@@ -57,6 +67,31 @@ export interface ScoredCandidate extends DistractorCandidate {
     specDist: number;
     dataDist: number;
     dataDetail: DataDistance;
+}
+
+/**
+ * Reorder candidates so the methods take turns, keeping each method's own
+ * nearest-first order.
+ *
+ * Ranking purely by distance would hand almost every question to
+ * `data-perturb`: a nudged value scores ~0.1 combined while the cheapest form
+ * edit (a re-sort) scores 0.5, so the form lures lose every comparison. A
+ * question whose three lures are all value nudges only ever probes one kind of
+ * memory. Taking turns keeps both kinds on screen while still preferring the
+ * hardest lure available from each.
+ */
+export function interleaveByMethod<T extends { method: Method }>(sorted: T[]): T[] {
+    const queues = new Map<Method, T[]>();
+    for (const c of sorted) {
+        if (!queues.has(c.method)) queues.set(c.method, []);
+        queues.get(c.method)!.push(c);
+    }
+    const out: T[] = [];
+    const lists = [...queues.values()];
+    for (let i = 0; out.length < sorted.length; i++) {
+        for (const list of lists) if (i < list.length) out.push(list[i]);
+    }
+    return out;
 }
 
 /** Score every candidate of one chart on the two distance axes. */
@@ -145,10 +180,12 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
     // Phase 2 — score (cheap, no rendering) and order charts by focus time.
     const scoredPerChart = generated.map(({ chart, candidates }) => ({
         chart,
-        scored: scoreCandidates(chart, candidates)
-            .filter(c => !c.caveat && !QUIZ_EXCLUDE_METHODS.has(c.method))
-            // hardest first: the nearest lure on both axes
-            .sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist)),
+        scored: interleaveByMethod(
+            scoreCandidates(chart, candidates)
+                .filter(c => !c.caveat && QUIZ_METHODS.has(c.method))
+                // hardest first: the nearest lure on both axes
+                .sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist)),
+        ),
     }));
     scoredPerChart.sort((a, b) => (b.chart.focusMs ?? 0) - (a.chart.focusMs ?? 0));
 
@@ -179,6 +216,12 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
         // lures survive the guard.
         const kept: QuizOption[] = [];
         const keptHashes = new Set<string>();
+        // Step 1 hides all text, so a lure must also differ from the original
+        // once the labels are gone. Otherwise a text-only change — the
+        // label-substitution perturbation relabels a single category and leaves
+        // every mark where it was — would put two identical pictures on screen
+        // and make step 1 unanswerable.
+        const blindHashes = new Set<string>([renderHash(stripSvgText(origSvg))]);
         let cursor = 0;
         while (kept.length < LURES_PER_ITEM && cursor < scored.length && cursor < maxRenders) {
             const batch = scored.slice(cursor, cursor + batchSize);
@@ -194,7 +237,10 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
                 const h = renderHash(svg);
                 if (h === origHash) continue;                  // would be a 2nd correct answer
                 if (keptHashes.has(h)) continue;               // duplicate option
+                const blind = renderHash(stripSvgText(svg));
+                if (blindHashes.has(blind)) continue;          // indistinguishable in step 1
                 keptHashes.add(h);
+                blindHashes.add(blind);
                 kept.push({
                     id: `${chart.id}_d${kept.length}`,
                     svg,
@@ -356,7 +402,7 @@ export async function buildAuthorViewForChart(
                 dataDetail: cand.dataDetail,
                 dataEditNote: cand.dataEditNote,
                 caveat: cand.caveat,
-                quizEligible: !QUIZ_EXCLUDE_METHODS.has(cand.method) && !cand.caveat,
+                quizEligible: QUIZ_METHODS.has(cand.method) && !cand.caveat,
             });
         }
         if (lures.length) byMethod.push({ method, lures });

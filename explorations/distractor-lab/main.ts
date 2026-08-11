@@ -29,7 +29,7 @@ import {
     loadSession, compileToVegaLite,
     generateAll, chartRoles, DistractorCandidate, Method,
     specDiff, specDistance, dataDistance, mergeEdits, displayedOrder, kendallTauDistance, EDIT_COSTS,
-    renderHash, degenerateText, installSeededRandom,
+    renderHash, degenerateText, installSeededRandom, QUIZ_METHODS,
 } from './lib';
 
 const [statePath, outDir, vl2svgArg] = process.argv.slice(2);
@@ -114,6 +114,10 @@ async function run() {
         // Published so the gallery documents the costs it actually used;
         // a hand-written table in the HTML would drift from the code.
         editCosts: EDIT_COSTS,
+        // Published for the same reason as editCosts: build_quiz.mjs is plain
+        // JS and cannot import the library, so reading the list from here is
+        // what keeps the offline quiz asking about the same methods as the app.
+        quizMethods: [...QUIZ_METHODS],
         seed: SEED,
         drops: [] as DropRecord[],
         dropSummary: {} as Record<string, number>,
