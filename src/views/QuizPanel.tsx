@@ -38,7 +38,7 @@ import {
     generateQuizForSession, buildQuizResult, authorViewForChart,
     GeneratedQuiz, QuizAnswer,
 } from '../app/quizGeneration';
-import { QuizItem, QuizOption, AuthoredChart, AuthoredLure, Method } from '../lib/quiz-distractors';
+import { QuizItem, QuizOption, AuthoredChart, AuthoredLure, Method, stripSvgText } from '../lib/quiz-distractors';
 
 interface QuizPanelProps {
     sessionId: string;
@@ -108,8 +108,14 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     const runIdRef = useRef(0);
 
     // ── quiz state ──
+    // Each question runs in three phases:
+    //   blind    — options with every label and tick value stripped; pick on shape
+    //   labeled  — the same options with their text shown; keep or change the pick
+    //   revealed — the answer, and how far the chosen look-alike was
     const [index, setIndex] = useState(0);
     const [answers, setAnswers] = useState<QuizAnswer[]>([]);
+    const [phase, setPhase] = useState<'blind' | 'labeled' | 'revealed'>('blind');
+    const [blindPick, setBlindPick] = useState<string | null>(null);
     const [picked, setPicked] = useState<string | null>(null);
     const [finished, setFinished] = useState(false);
 
@@ -120,7 +126,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     useEffect(() => {
         const runId = ++runIdRef.current;
         setQuiz(null); setError(null); setIndex(0); setAnswers([]);
-        setPicked(null); setFinished(false); setExpanded(new Set()); setAuthored({});
+        setPhase('blind'); setBlindPick(null); setPicked(null);
+        setFinished(false); setExpanded(new Set()); setAuthored({});
         (async () => {
             try {
                 const generated = await generateQuizForSession({
@@ -142,26 +149,46 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     const options = useMemo(() => (item ? shuffledOptions(item) : []), [item]);
     const correctCount = answers.filter(a => a.correct).length;
 
+    /** Select an option. Nothing is scored until the phase is confirmed. */
     const handlePick = useCallback((optionId: string) => {
-        if (!item || picked) return;
+        if (phase === 'revealed') return;
         setPicked(optionId);
-        const chosen = item.options.find(o => o.id === optionId);
-        const correct = optionId === item.correctId;
+    }, [phase]);
+
+    /** Step 1 → step 2: lock in the shape-only choice, then show the text. */
+    const handleConfirmBlind = useCallback(() => {
+        if (!picked) return;
+        setBlindPick(picked);
+        setPhase('labeled');
+        // `picked` carries over, so step 2 opens on the same choice and the
+        // reader decides whether the labels change their mind.
+    }, [picked]);
+
+    /** Step 2 → reveal: record both picks and score the final one. */
+    const handleConfirmFinal = useCallback(() => {
+        if (!item || !picked || !blindPick) return;
+        const chosen = item.options.find(o => o.id === picked);
+        const correct = picked === item.correctId;
         setAnswers(prev => [...prev, {
             n: index + 1, chartId: item.chartId, title: item.title, chartType: item.chartType,
-            correct, pickedId: optionId,
+            blindPickedId: blindPick,
+            blindCorrect: blindPick === item.correctId,
+            correct,
+            pickedId: picked,
+            changedAfterText: picked !== blindPick,
             method: correct ? undefined : chosen?.method,
             label: correct ? undefined : chosen?.label,
             specDist: correct ? undefined : chosen?.specDist,
             dataDist: correct ? undefined : chosen?.dataDist,
         }]);
-    }, [item, picked, index]);
+        setPhase('revealed');
+    }, [item, picked, blindPick, index]);
 
     const handleNext = useCallback(() => {
         if (!quiz) return;
         if (index + 1 >= quiz.items.length) { setFinished(true); return; }
         setIndex(i => i + 1);
-        setPicked(null);
+        setPhase('blind'); setBlindPick(null); setPicked(null);
     }, [quiz, index]);
 
     const handleDownload = useCallback(() => {
@@ -237,23 +264,51 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     );
 
     const optionCard = (opt: QuizOption) => {
+        const revealed = phase === 'revealed';
         const isCorrect = item && opt.id === item.correctId;
         const isPicked = picked === opt.id;
+        const wasBlindPick = blindPick === opt.id;
+
+        // Selecting is a neutral highlight; right/wrong colour appears only once
+        // the final answer is confirmed, so step 2 is a real second judgement
+        // rather than a correction of feedback already given.
         let bc = borderColor.view, sh = 'none';
-        if (picked) {
+        if (revealed) {
             if (isCorrect) { bc = theme.palette.success.main; sh = `0 0 0 3px ${alpha(theme.palette.success.main, 0.18)}`; }
             else if (isPicked) { bc = theme.palette.error.main; sh = `0 0 0 3px ${alpha(theme.palette.error.main, 0.18)}`; }
+        } else if (isPicked) {
+            bc = theme.palette.primary.main; sh = `0 0 0 3px ${alpha(theme.palette.primary.main, 0.16)}`;
         }
+
         return (
-            <Box
-                key={opt.id} component="button" disabled={!!picked}
-                onClick={() => handlePick(opt.id)}
-                sx={{ p: 0.75, background: '#fff', cursor: picked ? 'default' : 'pointer',
-                      border: `2px solid ${bc}`, boxShadow: sh, borderRadius: radius.sm,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: size.optionMin,
-                      '&:hover': picked ? {} : { borderColor: theme.palette.primary.main } }}
-            >
-                <img src={svgUri(opt.svg)} alt="" style={{ maxWidth: '100%', maxHeight: size.optionH, height: 'auto' }} />
+            <Box key={opt.id} sx={{ position: 'relative', display: 'flex' }}>
+                <Box
+                    component="button" disabled={revealed}
+                    onClick={() => handlePick(opt.id)}
+                    aria-pressed={isPicked}
+                    sx={{ flex: 1, p: 0.75, background: '#fff', cursor: revealed ? 'default' : 'pointer',
+                          border: `2px solid ${bc}`, boxShadow: sh, borderRadius: radius.sm,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: size.optionMin,
+                          transition: 'border-color .12s, box-shadow .12s',
+                          '&:hover': revealed ? {} : { borderColor: theme.palette.primary.main } }}
+                >
+                    <img
+                        // Step 1 shows the same render with its text removed, so
+                        // the shape is judged before the labels can be read.
+                        src={svgUri(phase === 'blind' ? stripSvgText(opt.svg) : opt.svg)}
+                        alt=""
+                        style={{ maxWidth: '100%', maxHeight: size.optionH, height: 'auto' }}
+                    />
+                </Box>
+                {/* In step 2 and after, mark what shape alone had suggested. */}
+                {phase !== 'blind' && wasBlindPick && (
+                    <Chip
+                        size="small"
+                        label={t('quiz.firstChoice', { defaultValue: 'your first choice' })}
+                        sx={{ position: 'absolute', top: 6, left: 6, height: 18, fontSize: 9.5,
+                              backgroundColor: alpha(theme.palette.primary.main, 0.12), color: 'primary.main' }}
+                    />
+                )}
             </Box>
         );
     };
@@ -271,6 +326,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         }
         if (finished) {
             const missCount = answers.length - correctCount;
+            const blindCorrect = answers.filter(a => a.blindCorrect).length;
+            const changed = answers.filter(a => a.changedAfterText).length;
             return (
                 <Box sx={{ p: 1.5 }}>
                     <Typography sx={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
@@ -279,12 +336,23 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                             {' '}/ {quiz.items.length} {t('quiz.correctSuffix', { defaultValue: 'correct' })}
                         </Typography>
                     </Typography>
-                    <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, mb: 1 }}>
+                    <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
                         {missCount === 0
                             ? t('quiz.noMisses', { defaultValue: 'You recognized every chart.' })
                             : missCount === 1
                                 ? t('quiz.missesOne', { defaultValue: '1 miss — the look-alike that fooled you is listed below.' })
                                 : t('quiz.missesMany', { count: missCount, defaultValue: `${missCount} misses — the look-alikes that fooled you are listed below.` })}
+                    </Typography>
+                    {/* The two-step split: what the shape alone got, and how
+                        often reading the text changed the answer. */}
+                    <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1 }}>
+                        {t('quiz.shapeOnlyScore', { blind: blindCorrect, total: quiz.items.length,
+                            defaultValue: `From shape alone (step 1): ${blindCorrect} / ${quiz.items.length}.` })}
+                        {' '}
+                        {changed === 0
+                            ? t('quiz.changedNone', { defaultValue: 'The text never changed your mind.' })
+                            : t('quiz.changedSome', { count: changed,
+                                defaultValue: `The text changed your answer on ${changed} of them.` })}
                     </Typography>
                     <Box sx={{ overflowX: 'auto' }}>
                         <Table size="small">
@@ -292,7 +360,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                 <TableRow>
                                     <TableCell sx={{ fontSize: 10, px: 0.5 }}>#</TableCell>
                                     <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChart', { defaultValue: 'Chart' })}</TableCell>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colResult', { defaultValue: 'Result' })}</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colShape', { defaultValue: 'Shape only' })}</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colResult', { defaultValue: 'With text' })}</TableCell>
                                     <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChosen', { defaultValue: 'If missed: look-alike chosen' })}</TableCell>
                                 </TableRow>
                             </TableHead>
@@ -302,9 +371,19 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                         <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.n}</TableCell>
                                         <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.title}</TableCell>
                                         <TableCell sx={{ fontSize: 11, px: 0.5 }}>
+                                            {a.blindCorrect
+                                                ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                                                : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>
                                             {a.correct
                                                 ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
                                                 : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
+                                            {a.changedAfterText && (
+                                                <Typography component="span" sx={{ fontSize: 9.5, color: 'text.disabled', ml: 0.5 }}>
+                                                    {t('quiz.changedTag', { defaultValue: 'changed' })}
+                                                </Typography>
+                                            )}
                                         </TableCell>
                                         <TableCell sx={{ fontSize: 11, px: 0.5, color: 'text.secondary' }}>
                                             {a.correct ? '—' : `${a.label ?? ''} (${a.specDist}, ${a.dataDist})`}
@@ -319,7 +398,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                             {t('quiz.download', { defaultValue: 'Download answers' })}
                         </Button>
                         <Button size="small" startIcon={<ReplayIcon sx={{ fontSize: 15 }} />}
-                            onClick={() => { setIndex(0); setAnswers([]); setPicked(null); setFinished(false); }}
+                            onClick={() => { setIndex(0); setAnswers([]); setPhase('blind'); setBlindPick(null); setPicked(null); setFinished(false); }}
                             sx={{ fontSize: 12, textTransform: 'none' }}>
                             {t('quiz.again', { defaultValue: 'Take it again' })}
                         </Button>
@@ -338,26 +417,51 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                         {index + 1} / {quiz.items.length}
                     </Typography>
                 </Box>
-                <Typography sx={{ fontSize: 12.5, mb: 1 }}>
+                <Typography sx={{ fontSize: 12.5 }}>
                     {t('quiz.questionPrompt', { seconds: secs(item!.focusMs),
                         defaultValue: `Which of these did you make? You spent about ${secs(item!.focusMs)}s on it.` })}
+                </Typography>
+                {/* Which of the two steps this is, and what changes between them. */}
+                <Typography sx={{ fontSize: 11.5, color: phase === 'blind' ? 'primary.main' : 'text.secondary', mb: 1 }}>
+                    {phase === 'blind'
+                        ? t('quiz.stepBlind', { defaultValue: 'Step 1 of 2 — labels and values are hidden. Go by the shape.' })
+                        : phase === 'labeled'
+                            ? t('quiz.stepLabeled', { defaultValue: 'Step 2 of 2 — the text is now shown. Keep your answer or change it.' })
+                            : t('quiz.stepDone', { defaultValue: 'Answer recorded.' })}
                 </Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: size.optionCols, gap: wide ? 2 : 1 }}>
                     {options.map(optionCard)}
                 </Box>
                 <Typography sx={{ fontSize: 12, mt: 1, minHeight: 32, color: gotIt ? 'success.main' : 'error.main' }}>
-                    {picked
+                    {phase === 'revealed'
                         ? (gotIt
                             ? t('quiz.verdictCorrect', { defaultValue: 'Correct — that is the chart from your session.' })
                             : t('quiz.verdictWrong', { form: chosen?.specDist, values: chosen?.dataDist,
                                 defaultValue: `Not this one — it is a look-alike (form ${chosen?.specDist}, values ${chosen?.dataDist}). The real chart is outlined in green.` }))
                         : ''}
                 </Typography>
-                <Button size="small" variant="contained" disabled={!picked} onClick={handleNext} sx={{ fontSize: 12, textTransform: 'none' }}>
-                    {index + 1 >= quiz.items.length
-                        ? t('quiz.seeResults', { defaultValue: 'See results' })
-                        : t('quiz.next', { defaultValue: 'Next' })}
-                </Button>
+                {phase === 'revealed' && picked !== blindPick && (
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mb: 1 }}>
+                        {t('quiz.changedNote', { defaultValue: 'You changed your answer once the text appeared.' })}
+                    </Typography>
+                )}
+                {phase === 'blind' && (
+                    <Button size="small" variant="contained" disabled={!picked} onClick={handleConfirmBlind} sx={{ fontSize: 12, textTransform: 'none' }}>
+                        {t('quiz.confirmBlind', { defaultValue: 'Confirm, then show the text' })}
+                    </Button>
+                )}
+                {phase === 'labeled' && (
+                    <Button size="small" variant="contained" disabled={!picked} onClick={handleConfirmFinal} sx={{ fontSize: 12, textTransform: 'none' }}>
+                        {t('quiz.confirmFinal', { defaultValue: 'Confirm answer' })}
+                    </Button>
+                )}
+                {phase === 'revealed' && (
+                    <Button size="small" variant="contained" onClick={handleNext} sx={{ fontSize: 12, textTransform: 'none' }}>
+                        {index + 1 >= quiz.items.length
+                            ? t('quiz.seeResults', { defaultValue: 'See results' })
+                            : t('quiz.next', { defaultValue: 'Next' })}
+                    </Button>
+                )}
             </Box>
         );
     };

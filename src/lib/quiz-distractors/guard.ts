@@ -52,6 +52,26 @@ export function renderHash(svg: string): string {
         s.length.toString(16);
 }
 
+/**
+ * Remove every piece of text a chart draws — axis titles, tick values, legend
+ * labels, data labels — leaving the marks, scales and colors in place.
+ *
+ * Used by the quiz's first step, which asks whether the SHAPE of a chart is
+ * remembered before letting the reader see what was written on it. Stripping
+ * the rendered SVG rather than re-rendering a text-free spec matters: the two
+ * steps must show the *same* chart, and removing `<text>` cannot move a single
+ * mark, whereas a re-render without labels would re-lay-out the plotting area.
+ */
+export function stripSvgText(svg: string): string {
+    return svg
+        .replace(/<text\b[^>]*>[\s\S]*?<\/text>/g, '')
+        .replace(/<text\b[^>]*\/>/g, '')
+        // Vega puts accessible descriptions on group marks; they would leak the
+        // labels to anyone reading the DOM (or a screen reader) mid-question.
+        .replace(/\saria-label="[^"]*"/g, '')
+        .replace(/<title>[\s\S]*?<\/title>/g, '');
+}
+
 const BAD_TOKENS = new Set(['NaN', 'undefined', 'null', 'Infinity', '-Infinity']);
 
 /**

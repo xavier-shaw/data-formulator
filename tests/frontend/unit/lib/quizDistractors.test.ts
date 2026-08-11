@@ -7,6 +7,7 @@ import {
     withSeededRandom,
     renderHash,
     degenerateText,
+    stripSvgText,
     QUIZ_EXCLUDE_METHODS,
     chartFamily,
     LURES_PER_ITEM,
@@ -109,6 +110,26 @@ describe('guard', () => {
         expect(renderHash('<svg><path d="M0.123456"/></svg>')).toBe(renderHash('<svg><path d="M0.123999"/></svg>'));
         // but a real coordinate change still registers
         expect(renderHash('<svg><path d="M0.123456"/></svg>')).not.toBe(renderHash('<svg><path d="M0.987654"/></svg>'));
+    });
+
+    it('strips every drawn label but keeps the marks', () => {
+        const svg = '<svg><path class="mark" d="M0,0L5,5"/><text x="1" y="2">Take-off Run</text>'
+            + '<rect width="3" height="4"/><text transform="rotate(-90)">Strike Count</text></svg>';
+        const bare = stripSvgText(svg);
+        expect(bare).not.toMatch(/Take-off Run|Strike Count/);
+        expect(bare).not.toMatch(/<text/);
+        // the data marks — the thing step 1 asks about — must survive untouched
+        expect(bare).toContain('<path class="mark" d="M0,0L5,5"/>');
+        expect(bare).toContain('<rect width="3" height="4"/>');
+    });
+
+    it('removes text that would leak through the DOM or a screen reader', () => {
+        const svg = '<svg><g aria-label="Gulls: 603"><path d="M0,0"/></g><title>tooltip text</title>'
+            + '<text/></svg>';
+        const bare = stripSvgText(svg);
+        expect(bare).not.toMatch(/Gulls|603|tooltip text/);
+        expect(bare).not.toMatch(/aria-label|<title>|<text/);
+        expect(bare).toContain('<path d="M0,0"/>');
     });
 
     it('flags charts that drew broken labels', () => {

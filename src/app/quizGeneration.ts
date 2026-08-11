@@ -174,14 +174,32 @@ export async function authorViewForChart(args: AuthorViewArgs): Promise<Authored
 
 // ── answer recording ─────────────────────────────────────────────────────
 
+/**
+ * One answer, recorded across both steps of a question.
+ *
+ * Each chart is asked twice: first with all text stripped from the options
+ * (axis labels, tick values, legend text), then again with the text shown. That
+ * separates two different memories — the shape of a chart, and what was written
+ * on it — and `changedAfterText` says whether reading the labels overturned the
+ * judgement the shape alone produced.
+ */
 export interface QuizAnswer {
     n: number;
     chartId: string;
     title: string;
     chartType: string;
+
+    /** step 1: chosen while all text was hidden */
+    blindPickedId: string;
+    blindCorrect: boolean;
+
+    /** step 2 (final): chosen with the text visible */
     correct: boolean;
     pickedId: string;
-    /** set only on a miss: which method produced the chosen look-alike */
+    /** did seeing the text change the answer? */
+    changedAfterText: boolean;
+
+    /** set only on a final miss: which method produced the chosen look-alike */
     method?: string;
     label?: string;
     /** the misrecall distances: how far the chosen look-alike sat from the real chart */
