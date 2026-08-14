@@ -218,6 +218,14 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         return () => { live = false; };
     }, [sessionId, liveState]);
 
+    // Form B's items, derived from the same trace material form A is scored
+    // against — seeded, so re-entering the form does not reshuffle the moves.
+    const provMaterial = useMemo(
+        () => (traceMaterial && traceMaterial !== 'loading' && traceMaterial !== 'failed'
+            ? buildProvenanceMaterial(traceMaterial)
+            : null),
+        [traceMaterial]);
+
     const item = quiz?.items[index];
     const options = useMemo(() => (item ? shuffledOptions(item) : []), [item]);
     const correctCount = answers.filter(a => a.correct).length;
@@ -623,9 +631,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 </Box>
             );
         }
-        // Built here, not in the loader: form A needs the same material without it.
-        const provMaterial = traceStage === 'provenance' ? buildProvenanceMaterial(traceMaterial) : null;
-        if (provMaterial && provMaterial.items.length === 0) {
+        if (traceStage === 'provenance' && provMaterial && provMaterial.items.length === 0) {
             return (
                 <Box sx={{ p: 2 }}>
                     <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 1 }}>

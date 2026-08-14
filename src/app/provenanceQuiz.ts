@@ -98,14 +98,31 @@ const shuffle = <T>(items: T[], rnd: () => number): T[] => {
 };
 
 /**
- * Which moves to ask about. Random for now — see the module note.
+ * Which moves to ask about. Random for now — see the module note — but never
+ * two moves that share a chart: item A's context ("before that #8, you were
+ * here #9") would otherwise hand over item B's answer, since B asks what
+ * followed #8. Items therefore stand on DISJOINT stretches of the analysis.
+ *
  * A transition is a ground-truth lineage edge: `from` led to `to`.
  */
 export const sampleTransitions = (
     edges: { from: string; to: string }[],
     count: number,
     rnd: () => number,
-): { from: string; to: string }[] => shuffle(edges, rnd).slice(0, count);
+    parentOf: (chartId: string) => string | null,
+): { from: string; to: string }[] => {
+    const picked: { from: string; to: string }[] = [];
+    const used = new Set<string>();
+    for (const edge of shuffle(edges, rnd)) {
+        if (picked.length >= count) break;
+        // the three charts this item would put on screen as its own trace
+        const shown = [edge.from, edge.to, parentOf(edge.from)].filter(Boolean) as string[];
+        if (shown.some(id => used.has(id))) continue;
+        picked.push(edge);
+        for (const id of shown) used.add(id);
+    }
+    return picked;
+};
 
 /**
  * The two charts offered alongside the real next chart. Random for now, drawn
@@ -131,8 +148,10 @@ export function buildProvenanceMaterial(
     const rnd = makeRng(seed);
     const byId = new Map(material.charts.map(c => [c.chartId, c]));
 
+    const parentOf = (chartId: string) => byId.get(chartId)?.parentChartId ?? null;
+
     const items: ProvenanceItem[] = [];
-    for (const edge of sampleTransitions(material.edges, count, rnd)) {
+    for (const edge of sampleTransitions(material.edges, count, rnd, parentOf)) {
         const from = byId.get(edge.from);
         const answer = byId.get(edge.to);
         if (!from || !answer) continue;

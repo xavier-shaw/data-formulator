@@ -29,14 +29,34 @@ const material = (): TraceMaterial => {
 describe('buildProvenanceMaterial', () => {
     it('offers three real charts per item, one of them the true next chart', () => {
         const m = buildProvenanceMaterial(material());
+        const made = new Set(material().charts.map(c => c.chartId));
         expect(m.items.length).toBeGreaterThan(0);
         for (const item of m.items) {
             expect(item.options).toHaveLength(OPTIONS_PER_ITEM);
             expect(item.options.map(o => o.chartId)).toContain(item.answerChartId);
             // every option is a chart the participant actually made
-            for (const o of item.options) expect(m.items.length && o.svg).toBeDefined();
+            for (const o of item.options) expect(made.has(o.chartId)).toBe(true);
             // no duplicate option
             expect(new Set(item.options.map(o => o.chartId)).size).toBe(OPTIONS_PER_ITEM);
+        }
+    });
+
+    it('never lets one item show the move another item asks about', () => {
+        // The context reads "before that X, you were here Y" — which states that
+        // Y followed X, and so answers any item asking what came after X.
+        for (const seed of [1, 20260814, 77, 4242]) {
+            const items = buildProvenanceMaterial(material(), { seed }).items;
+            const asked = new Set(items.map(i => `${i.from.chartId}→${i.answerChartId}`));
+            for (const item of items) {
+                if (item.previous) {
+                    expect(asked.has(`${item.previous.chartId}→${item.from.chartId}`)).toBe(false);
+                }
+            }
+            // stronger, and what the sampler actually guarantees: an item's own
+            // trace shares no chart with another's
+            const shown = items.flatMap(i =>
+                [i.previous?.chartId, i.from.chartId, i.answerChartId].filter(Boolean));
+            expect(new Set(shown).size).toBe(shown.length);
         }
     });
 
@@ -65,9 +85,16 @@ describe('buildProvenanceMaterial', () => {
     });
 
     it('honours the item count and reports what the session had to offer', () => {
-        const m = buildProvenanceMaterial(material(), { count: 2 });
-        expect(m.items).toHaveLength(2);
-        expect(m.transitionsAvailable).toBe(4);
+        // A long enough chain that disjoint items are actually available: each
+        // item claims three charts, so a short session yields fewer than asked.
+        const chain = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+            .map((id, i) => chart(id, i + 1, i === 0 ? null : String.fromCharCode(96 + i)));
+        const long: TraceMaterial = {
+            sessionId: 's3', charts: chain, skipped: [],
+            edges: chain.filter(c => c.parentChartId).map(c => ({ from: c.parentChartId!, to: c.chartId })),
+        };
+        expect(buildProvenanceMaterial(long, { count: 2 }).items).toHaveLength(2);
+        expect(buildProvenanceMaterial(long).transitionsAvailable).toBe(9);
     });
 
     it('produces nothing rather than a two-option item when charts run out', () => {
