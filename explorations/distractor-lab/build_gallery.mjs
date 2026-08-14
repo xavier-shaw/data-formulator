@@ -71,33 +71,23 @@ const fmt = (n) => (Math.round(n * 100) / 100).toString();
 // Method descriptions follow ASD-STE100 Simplified Technical English:
 // short sentences, active voice, present tense, one idea per sentence.
 const METHOD_INFO = {
-    'enumeration': {
-        name: 'Enumeration',
-        short: 'many possible charts',
-        desc: 'This method makes many charts from the same table. It uses each dimension with each measure, in different chart forms. Flint’s recommender selects the encodings for each form. The participant must find the one chart that the session contains.',
+    'form': {
+        name: 'Form',
+        short: 'drawn differently',
+        desc: 'This method keeps the data and changes the drawing. It can change the mark type, exchange the two axes, or change the colors. The values, the sort, and the aggregation do not change. These lures show if the participant remembers how the chart looked.',
     },
-    'graphscape': {
-        name: 'GraphScape walks',
-        short: 'one edit at a time',
-        desc: 'This method changes the original chart one step at a time. A step is a single edit: a new sort, a swap of the two axes, a different mark, or a different field. Each edit has a cost. The method puts the edits together to make small, medium, and large distances. The sort goes on the category channel. On the measure channel, the sort applies to a quantitative scale, and the chart does not change.',
+    'content': {
+        name: 'Content',
+        short: 'data says something else',
+        desc: 'This method keeps the drawing and changes what the data says. It can change the sort, the scale, the aggregation, or the filter. It can also change the values: exchange two ranks, reverse the pattern, make the effect smaller or larger, move the peak, or replace one label. These lures show if the participant remembers what the data said.',
     },
-    'data-perturb': {
-        name: 'Data perturbation',
-        short: 'same form, new values',
-        desc: 'This method keeps the chart form and changes the values. It can exchange two ranks, reverse the pattern, make the effect smaller or larger, move the peak, or replace one label. The spec distance is always 0. These lures show if the participant remembers the pattern or only the form.',
-    },
-    'sibling-measure': {
-        name: 'Sibling measure',
-        short: 'real columns, not plotted',
-        desc: 'The transform of the participant made more columns than the participant plotted. Examples are incidents, any_damage_rate, and the totals. This method puts one of these real columns on the measure axis. The result is a correct chart of true data that the participant did not see.',
-    },
-    'session-hybrid': {
-        name: 'Session hybrid',
-        short: 'content from another chart',
-        desc: 'This method uses the form of this chart with the content of a different chart. The two charts come from the same session and share a measure or a dimension. This shows the interference between two similar analyses. Interference is a usual cause of errors in recognition.',
+    'combined': {
+        name: 'Combined',
+        short: 'both at once',
+        desc: 'This method applies one form edit and one content edit together. The drawing and the data both change. In a quiz item, the combined lure uses the same two edits as the other two lures. Thus the item shows the original chart, A, B, and A+B.',
     },
 };
-const METHOD_ORDER = ['graphscape', 'enumeration', 'data-perturb', 'sibling-measure', 'session-hybrid'];
+const METHOD_ORDER = ['form', 'content', 'combined'];
 
 // ── overview scatter ─────────────────────────────────────────────────────
 

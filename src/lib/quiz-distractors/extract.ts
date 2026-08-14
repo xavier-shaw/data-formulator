@@ -141,6 +141,77 @@ export function extractSession(s: SessionStateLike): SessionData {
 
 export const CANVAS = { width: 300, height: 220 };
 
+/**
+ * Alternate palettes for the color-shift form lure. Same lightness texture as
+ * the default tableau10, hues rotated, so a shifted chart still looks like an
+ * app chart — just not the one the participant made.
+ */
+const QUIZ_PALETTES: string[][] = [
+    ['#e45756', '#f58518', '#72b7b2', '#4c78a8', '#54a24b', '#eeca3b', '#b279a2', '#ff9da6', '#9d755d', '#bab0ac'],
+    ['#54a24b', '#b279a2', '#f58518', '#72b7b2', '#e45756', '#4c78a8', '#eeca3b', '#9d755d', '#ff9da6', '#bab0ac'],
+];
+
+/**
+ * Recolor a compiled VL spec in place: rotate the categorical range and remap
+ * every explicit mark/encoding color a template hard-coded. Charts whose color
+ * comes entirely from the default config pick it up via `config.range` /
+ * `config.mark`; the render-identity guard drops any chart where the shift
+ * turned out to be inert.
+ */
+function recolorVl(vl: any, shift: number): void {
+    const palette = QUIZ_PALETTES[(shift - 1 + QUIZ_PALETTES.length) % QUIZ_PALETTES.length];
+    const remap = new Map<string, string>();
+    let next = 0;
+    const replacement = (orig: string) => {
+        if (!remap.has(orig)) remap.set(orig, palette[next++ % palette.length]);
+        return remap.get(orig)!;
+    };
+    const isColor = (v: any) => typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v);
+    const walk = (o: any): void => {
+        if (!o || typeof o !== 'object') return;
+        if (o.mark && typeof o.mark === 'object' && isColor(o.mark.color)) {
+            o.mark.color = replacement(o.mark.color);
+        }
+        if (o.color && typeof o.color === 'object' && isColor(o.color.value)) {
+            o.color.value = replacement(o.color.value);
+        }
+        if (o.scale && Array.isArray(o.scale.range) && o.scale.range.every(isColor)) {
+            o.scale.range = o.scale.range.map(replacement);
+        }
+        for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v);
+    };
+    walk(vl);
+    vl.config = {
+        ...vl.config,
+        range: { ...vl.config?.range, category: palette },
+        mark: { ...vl.config?.mark, color: palette[0] },
+    };
+}
+
+/**
+ * Put the named quantitative field on a log scale, wherever it is encoded on a
+ * positional channel. Generation only offers this for strictly-positive
+ * measures, so the log domain is always valid.
+ */
+function injectLogScale(vl: any, field: string): void {
+    const unescape = (s: string) => String(s).replace(/\\/g, '');
+    const walk = (o: any): void => {
+        if (!o || typeof o !== 'object') return;
+        if (o.encoding && typeof o.encoding === 'object') {
+            for (const ch of ['x', 'y']) {
+                const def = o.encoding[ch];
+                if (def && typeof def.field === 'string' && unescape(def.field) === field) {
+                    def.scale = { ...def.scale, type: 'log' };
+                    // a log scale cannot include zero, and stacking is meaningless on it
+                    if ('stack' in def) def.stack = null;
+                }
+            }
+        }
+        for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v);
+    };
+    walk(vl);
+}
+
 export function compileToVegaLite(
     spec: ChartLevelSpec,
     rows: any[],
@@ -153,6 +224,13 @@ export function compileToVegaLite(
         if (meta.displayName) displayNames[name] = meta.displayName;
     }
 
+    // Quiz-internal directives ride in config under `_quiz*` keys — the
+    // assembler never sees them (they are applied to the compiled VL below),
+    // and specDiff ignores them when costing config changes.
+    const config = spec.config ?? {};
+    const chartProperties = Object.fromEntries(
+        Object.entries(config).filter(([k]) => !k.startsWith('_quiz')));
+
     const vl = assembleVegaLite({
         data: { values: rows },
         semantic_types: semanticTypes,
@@ -160,7 +238,7 @@ export function compileToVegaLite(
             chartType: spec.chartType,
             encodings: spec.encodings as any,
             canvasSize: CANVAS,
-            chartProperties: spec.config,
+            chartProperties,
         },
         field_display_names: displayNames,
         options: { maxStretchFactor: 2.2 },
@@ -170,6 +248,8 @@ export function compileToVegaLite(
         // Strip assembler by-products; give quiz-friendly white background.
         delete vl._options;
         vl.background = 'white';
+        if (typeof config._quizColorShift === 'number') recolorVl(vl, config._quizColorShift);
+        if (typeof config._quizLogScaleField === 'string') injectLogScale(vl, config._quizLogScaleField);
     }
     return vl;
 }
@@ -198,11 +278,17 @@ export function cloneSpec(spec: ChartLevelSpec): ChartLevelSpec {
     return JSON.parse(JSON.stringify(spec));
 }
 
-/** Canonical signature of a chart-level spec (for dedupe). */
+/** Canonical signature of a chart-level spec (for dedupe). Includes config,
+ *  since two variants may differ only in a config-carried edit (color shift,
+ *  scale change) and must not collapse into one. */
 export function specSignature(spec: ChartLevelSpec): string {
     const enc = Object.entries(spec.encodings)
         .map(([ch, e]) => `${ch}:${e.field}:${e.sortOrder ?? ''}:${e.sortBy ?? ''}:${e.aggregate ?? ''}`)
         .sort()
         .join('|');
-    return `${spec.chartType}||${enc}`;
+    const cfg = Object.entries(spec.config ?? {})
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .sort()
+        .join(',');
+    return `${spec.chartType}||${enc}||${cfg}`;
 }

@@ -112,13 +112,23 @@ the run exits non-zero if any degenerate lure survives.
 
 Descriptions use ASD-STE100 Simplified Technical English.
 
-| Method | What it does | Distance profile |
+A lure changes the FORM, the CONTENT, or both. The form is how the chart is
+drawn. The content is what the data says.
+
+| Axis | What it does | Distance profile |
 |---|---|---|
-| `enumeration` | Makes many charts from the same table. Uses each dimension with each measure, in different chart forms. Flint's `vlRecommendEncodings` selects the encodings. | spec > 0, data = 0 |
-| `graphscape` | Changes the chart one step at a time. A step is a new sort, a swap of the axes, a different mark, or a different field. Puts the steps together to make small, medium, and large distances. | spec 0.5–5+, data = 0 |
-| `data-perturb` | Keeps the form and changes the values. Exchanges two ranks, reverses the pattern, makes the effect smaller or larger, moves the peak, or replaces one label. | spec = 0, data > 0 |
-| `sibling-measure` | Puts a real column of the same table on the measure axis. The participant computed the column but did not plot it. | spec ≈ 2, data = 0 |
-| `session-hybrid` | Uses the form of this chart with the content of a different chart from the same session. | both > 0 |
+| `form` | Keeps the data and changes the drawing. Changes the mark type, exchanges the two axes, or changes the colors. The values, the sort, and the aggregation stay the same. | spec > 0, data = 0 |
+| `content` | Keeps the drawing and changes what the data says. Changes the sort, the scale, the aggregation, or the filter. Also changes the values: exchanges two ranks, reverses the pattern, makes the effect smaller or larger, moves the peak, or replaces one label. | spec ≈ 0, data > 0 |
+| `combined` | Applies one form edit and one content edit together. | both > 0 |
+
+A quiz item is a 2×2. It shows the original chart, one form lure **A**, one
+content lure **B**, and **A+B** — the same two edits together. The combined
+lure is not a different pair. Thus a wrong answer tells you which axis failed,
+and the combined option tells you if one axis alone was sufficient.
+
+`generators.ts` keeps each axis pure. A form lure must use the same rows. A
+content lure must use the same chart type and the same fields. `enforcePurity`
+removes a lure that breaks its axis, and it writes a warning.
 
 ## Distances
 

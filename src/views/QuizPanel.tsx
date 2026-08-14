@@ -2,21 +2,29 @@
 // Licensed under the MIT License.
 
 /**
- * QuizPanel — chart-recognition panel, docked beside the canvas.
+ * QuizPanel — the memory quiz, one tab per part.
  *
- * Two modes over the same generated look-alikes:
+ *  • 1 · Attributes   — which columns do you remember exploring?
+ *  • 2 · Combinations — which of them did you look at together? Their part-1
+ *                       attributes lead the palette; the groups they build are
+ *                       scored against the field sets their charts encoded.
+ *  • 3 · Charts       — which of these four did you make? A miss records how far
+ *                       the chosen look-alike sat from the real chart, which is
+ *                       what says *what* was misremembered.
+ *  • 4 · Path         — the reasoning trace: rebuild the analysis map, or walk
+ *                       the thread (two piloted forms).
+ *  • Results          — scores of whatever has been answered so far + download.
+ *  • Author           — inspect, nothing to answer: every method's look-alikes
+ *                       with their operations and distances, built per chart on
+ *                       expand (a whole session at once is hundreds of renders).
  *
- *  • Quiz   — answer, one chart at a time: which of these four did you make?
- *             Scored as you go; a miss records how far the chosen look-alike sat
- *             from the real chart, which is what says *what* was misremembered.
- *  • Author — inspect, nothing to answer: every method's look-alikes for a
- *             chart, with the operations each performed and the distances they
- *             produced. Charts are expanded on demand, because rendering every
- *             method's output for a whole session is hundreds of charts.
- *
- * A panel rather than a dialog so the canvas stays visible and usable: the
- * charts under discussion are right there, and in author mode you want to
- * compare a look-alike against the real thing on screen.
+ * Every tab is DIRECTLY reachable — a pilot can jump to part 4 without
+ * answering the questions — but the guided flow is preserved: each part's
+ * continue button advances to the next tab, and ticks mark answered parts.
+ * The ordering the tabs suggest still matters for a real run: 1 before 2 (the
+ * groups are built over the attributes just named), 2 before 3 (the chart
+ * options name both), 4 before Results (the results table reveals the true
+ * order and lineage), and within 4, form A before form B.
  */
 
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,10 +43,18 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useTranslation } from 'react-i18next';
 import { borderColor, radius } from '../app/tokens';
 import {
-    generateQuizForSession, buildQuizResult, authorViewForChart,
+    generateQuizForSession, buildQuizResult, authorViewForChart, loadRecallMaterial,
     GeneratedQuiz, QuizAnswer,
 } from '../app/quizGeneration';
-import { QuizItem, QuizOption, AuthoredChart, AuthoredLure, Method, stripSvgText } from '../lib/quiz-distractors';
+import {
+    ComboAnswer, ComboGroup, RecallAnswer, RecallMaterial, buildComboAnswer, buildRecallAnswer,
+} from '../app/fieldRecall';
+import { FieldRecallStep } from './FieldRecallStep';
+import { ComboRecallStep } from './ComboRecallStep';
+import { loadTraceMaterial, TraceMaterial, TraceTreeAnswer, TraceWalkthroughAnswer } from '../app/reasoningTrace';
+import { TraceTreeStep } from './TraceTreeStep';
+import { TraceWalkthroughStep } from './TraceWalkthroughStep';
+import { QuizItem, QuizOption, AuthoredChart, AuthoredLure, Method, stripSvgText, DEFAULT_SEED } from '../lib/quiz-distractors';
 
 interface QuizPanelProps {
     sessionId: string;
@@ -54,20 +70,16 @@ interface QuizPanelProps {
 }
 
 const METHOD_LABEL: Record<Method, string> = {
-    'graphscape': 'GraphScape walk',
-    'enumeration': 'Enumeration',
-    'data-perturb': 'Data perturbation',
-    'sibling-measure': 'Sibling measure',
-    'session-hybrid': 'Session hybrid',
+    'form': 'Form — drawn differently',
+    'content': 'Content — data says something else',
+    'combined': 'Combined — both at once',
 };
 
-/** One accent per method so a lure's origin reads at a glance. */
+/** One accent per axis so a lure's origin reads at a glance. */
 const METHOD_COLOR: Record<Method, string> = {
-    'graphscape': '#C4652A',
-    'enumeration': '#8A63BF',
-    'data-perturb': '#2E8B6B',
-    'sibling-measure': '#B5504B',
-    'session-hybrid': '#9C8425',
+    'form': '#C4652A',
+    'content': '#2E8B6B',
+    'combined': '#8A63BF',
 };
 
 const svgUri = (svg: string) =>
@@ -99,13 +111,31 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         ? { maxW: 1240, optionCols: '1fr 1fr', optionH: 380, optionMin: 300, lureCols: 'repeat(auto-fill, minmax(300px, 1fr))', lureH: 260, pad: 2.5 }
         : { maxW: 'none', optionCols: '1fr 1fr', optionH: 200, optionMin: 130, lureCols: '1fr 1fr', lureH: 190, pad: 1.5 };
 
-    const [mode, setMode] = useState<'quiz' | 'author'>('quiz');
+    // Every part is a tab, directly reachable — a pilot can jump to part 4
+    // without answering the chart questions. The guided flow still exists:
+    // each part's continue button advances to the next tab.
+    type PanelTab = 'recall' | 'combos' | 'charts' | 'trace' | 'results' | 'author';
+    const [tab, setTab] = useState<PanelTab>('recall');
 
     // ── shared generation (quiz mode drives it; author mode reuses the session) ──
     const [quiz, setQuiz] = useState<GeneratedQuiz | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [progress, setProgress] = useState({ done: 0, total: 0, label: '' });
     const runIdRef = useRef(0);
+
+    // ── parts 1 and 2: the attributes, then the combinations over them ──
+    // Kept OUTSIDE the generation effect's reset list on purpose: that effect
+    // re-fires whenever the live slices tick, and wiping a participant's fields
+    // or groups mid-answer would be unrecoverable.
+    const [recallMaterial, setRecallMaterial] = useState<RecallMaterial | null>(null);
+    const [recallFields, setRecallFields] = useState<string[]>([]);
+    const [recallAnswer, setRecallAnswer] = useState<RecallAnswer | null>(null);
+    /** the session's fields could not be read — skip parts 1 and 2 rather than stall on them */
+    const [recallFailed, setRecallFailed] = useState(false);
+    const recallStartRef = useRef<number>(Date.now());
+    const [comboGroups, setComboGroups] = useState<ComboGroup[]>([]);
+    const [comboAnswer, setComboAnswer] = useState<ComboAnswer | null>(null);
+    const comboStartRef = useRef<number>(Date.now());
 
     // ── quiz state ──
     // Each question runs in three phases:
@@ -119,6 +149,15 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     const [picked, setPicked] = useState<string | null>(null);
     const [finished, setFinished] = useState(false);
 
+    // ── part 4: reasoning trace ──
+    // Two prototype FORMS over the same material; the chooser lets a pilot
+    // participant try either (or both — the second run is practice, and the
+    // answer file records each form separately).
+    const [traceStage, setTraceStage] = useState<'choose' | 'tree' | 'thread'>('choose');
+    const [traceMaterial, setTraceMaterial] = useState<TraceMaterial | 'loading' | 'failed' | null>(null);
+    const [traceTreeAnswer, setTraceTreeAnswer] = useState<TraceTreeAnswer | null>(null);
+    const [traceThreadAnswer, setTraceThreadAnswer] = useState<TraceWalkthroughAnswer | null>(null);
+
     // ── author state: one entry per chart, filled in on expand ──
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [authored, setAuthored] = useState<Record<string, AuthoredChart | 'loading' | 'failed'>>({});
@@ -128,6 +167,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         setQuiz(null); setError(null); setIndex(0); setAnswers([]);
         setPhase('blind'); setBlindPick(null); setPicked(null);
         setFinished(false); setExpanded(new Set()); setAuthored({});
+        setTraceStage('choose'); setTraceMaterial(null);
+        setTraceTreeAnswer(null); setTraceThreadAnswer(null);
         (async () => {
             try {
                 const generated = await generateQuizForSession({
@@ -144,6 +185,37 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             }
         })();
     }, [sessionId, sessionName, liveState, t]);
+
+    // Back to part 1 when the panel is pointed at a different session — but
+    // ONLY then. The generation effect above re-fires on live-slice ticks, and
+    // yanking the tab away mid-part would be hostile.
+    useEffect(() => { setTab('recall'); }, [sessionId]);
+
+    // Part 2 is timed from when it is opened, not from when its material loaded
+    // — the material is part 1's, and timing from there would charge part 2 for
+    // the whole of part 1. Every entry re-stamps it, so `seconds` reports the
+    // visit the answer was confirmed in rather than the wall clock since first
+    // sight of the tab.
+    useEffect(() => { if (tab === 'combos') comboStartRef.current = Date.now(); }, [tab]);
+
+    // The recall step needs no rendering, so it loads immediately and the
+    // participant answers it while the look-alike charts are still being made.
+    useEffect(() => {
+        let live = true;
+        loadRecallMaterial({ sessionId, liveState })
+            .then(m => {
+                if (!live) return;
+                setRecallMaterial(m);
+                // Time the step from when it becomes answerable, not from mount.
+                recallStartRef.current = Date.now();
+            })
+            .catch(e => {
+                console.warn('[quiz] recall material could not be read:', e?.message);
+                // Otherwise step 1 would sit on its progress bar with no way out.
+                if (live) setRecallFailed(true);
+            });
+        return () => { live = false; };
+    }, [sessionId, liveState]);
 
     const item = quiz?.items[index];
     const options = useMemo(() => (item ? shuffledOptions(item) : []), [item]);
@@ -177,6 +249,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             pickedId: picked,
             changedAfterText: picked !== blindPick,
             method: correct ? undefined : chosen?.method,
+            op: correct ? undefined : chosen?.op,
             label: correct ? undefined : chosen?.label,
             specDist: correct ? undefined : chosen?.specDist,
             dataDist: correct ? undefined : chosen?.dataDist,
@@ -186,20 +259,69 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
 
     const handleNext = useCallback(() => {
         if (!quiz) return;
-        if (index + 1 >= quiz.items.length) { setFinished(true); return; }
+        // After the last question the guided flow moves on to part 4.
+        if (index + 1 >= quiz.items.length) { setFinished(true); setTab('trace'); return; }
         setIndex(i => i + 1);
         setPhase('blind'); setBlindPick(null); setPicked(null);
     }, [quiz, index]);
 
+    /** Restart part 3 only; the other parts' answers are kept. */
+    const handleRetake = useCallback(() => {
+        setIndex(0); setAnswers([]); setPhase('blind'); setBlindPick(null); setPicked(null);
+        setFinished(false); setTraceStage('choose'); setTab('charts');
+    }, []);
+
+    /** Part 1's continue: freeze (or re-freeze) the named attributes and move on.
+     *  Revisiting the tab and pressing it again simply updates the answer. */
+    const handleFinishRecall = useCallback(() => {
+        if (!recallMaterial) return;
+        setRecallAnswer(buildRecallAnswer(recallFields, recallMaterial, Date.now() - recallStartRef.current));
+        setTab('combos');
+    }, [recallFields, recallMaterial]);
+
+    /** Part 2's continue: freeze the combinations and move on to the charts.
+     *  Empty groups are dropped — they are scaffolding, not an answer. */
+    const handleFinishCombos = useCallback(() => {
+        if (!recallMaterial) return;
+        const groups = comboGroups.filter(g => g.length > 0);
+        setComboAnswer(buildComboAnswer(groups, recallMaterial, Date.now() - comboStartRef.current));
+        setTab('charts');
+    }, [comboGroups, recallMaterial]);
+
+    /** Enter one of the trace forms, building the material the first time. */
+    const handleEnterTrace = useCallback((form: 'tree' | 'thread') => {
+        setTraceStage(form);
+        if (traceMaterial && traceMaterial !== 'failed') return;   // built or in flight
+        setTraceMaterial('loading');
+        loadTraceMaterial({ sessionId, liveState })
+            .then(m => setTraceMaterial(m))
+            .catch(e => {
+                console.warn('[quiz] trace material could not be built:', e?.message);
+                setTraceMaterial('failed');
+            });
+    }, [traceMaterial, sessionId, liveState]);
+
     const handleDownload = useCallback(() => {
-        if (!quiz) return;
-        const result = buildQuizResult(quiz, answers, new Date().toISOString());
+        const completedAt = new Date().toISOString();
+        // Downloadable even when generation failed: parts 1 and 2 are then the
+        // only thing the session produced, and losing them would be the worst of
+        // the two failures.
+        const base = quiz
+            ? buildQuizResult(quiz, answers, completedAt, recallAnswer ?? undefined, comboAnswer ?? undefined)
+            : {
+                sessionId, sessionName, seed: DEFAULT_SEED, completedAt,
+                total: 0, correct: 0, answers: [],
+                recall: recallAnswer ?? undefined, combos: comboAnswer ?? undefined,
+            };
+        const result = (traceTreeAnswer || traceThreadAnswer)
+            ? { ...base, trace: { tree: traceTreeAnswer ?? undefined, thread: traceThreadAnswer ?? undefined } }
+            : base;
         const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = `quiz-${sessionName || sessionId}.json`; a.click();
         URL.revokeObjectURL(url);
-    }, [quiz, answers, sessionName, sessionId]);
+    }, [quiz, answers, recallAnswer, comboAnswer, traceTreeAnswer, traceThreadAnswer, sessionName, sessionId]);
 
     /** Expand a chart in author mode, generating its look-alikes the first time. */
     const toggleAuthorChart = useCallback(async (chartId: string) => {
@@ -236,14 +358,21 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         </Box>
     );
 
+    // A tick marks parts that already have an answer, so a pilot jumping
+    // around can see what is still open.
+    const tick = (done: boolean, label: string) => (done ? `${label} ✓` : label);
     const tabs = (
         <Tabs
-            value={mode}
-            onChange={(_, v) => setMode(v)}
+            value={tab}
+            onChange={(_, v) => setTab(v)}
             sx={{ minHeight: 34, borderBottom: `1px solid ${borderColor.view}`, flexShrink: 0,
-                  '& .MuiTab-root': { minHeight: 34, fontSize: 12, textTransform: 'none', py: 0 } }}
+                  '& .MuiTab-root': { minHeight: 34, fontSize: 12, textTransform: 'none', py: 0, minWidth: 0 } }}
         >
-            <Tab value="quiz" label={t('quiz.tabQuiz', { defaultValue: 'Quiz' })} />
+            <Tab value="recall" label={tick(!!recallAnswer, t('quiz.tabRecall', { defaultValue: '1 · Attributes' }))} />
+            <Tab value="combos" label={tick(!!comboAnswer, t('quiz.tabCombos', { defaultValue: '2 · Combinations' }))} />
+            <Tab value="charts" label={tick(finished, t('quiz.tabCharts', { defaultValue: '3 · Charts' }))} />
+            <Tab value="trace" label={tick(!!(traceTreeAnswer || traceThreadAnswer), t('quiz.tabTrace', { defaultValue: '4 · Path' }))} />
+            <Tab value="results" label={t('quiz.tabResults', { defaultValue: 'Results' })} />
             <Tab value="author" label={t('quiz.tabAuthor', { defaultValue: 'Author' })} />
         </Tabs>
     );
@@ -309,11 +438,291 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                               backgroundColor: alpha(theme.palette.primary.main, 0.12), color: 'primary.main' }}
                     />
                 )}
+                {/* After the answer, name what each look-alike changed. The four
+                    options are a 2×2 — original, A, B, A+B — and that only reads
+                    as one if the three lures are labelled together. */}
+                {revealed && opt.method && (
+                    <Chip
+                        size="small"
+                        label={`${opt.method === 'combined' ? 'A + B' : opt.method === 'form' ? 'A' : 'B'} · ${opt.label}`}
+                        sx={{ position: 'absolute', bottom: 6, left: 6, maxWidth: 'calc(100% - 12px)', height: 18,
+                              fontSize: 9.5, backgroundColor: alpha(METHOD_COLOR[opt.method], 0.14),
+                              color: METHOD_COLOR[opt.method] }}
+                    />
+                )}
             </Box>
         );
     };
 
-    const quizBody = () => {
+    /**
+     * How the named attributes scored. Shown only here, on the results screen:
+     * naming the right attributes earlier would give away the chart questions.
+     */
+    const recallSummary = (recall: RecallAnswer) => {
+        const s = recall.score;
+        const line = (label: string, items: string[], color: string) => (
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'baseline', mb: 0.25 }}>
+                <Typography sx={{ fontSize: 11, width: 116, flexShrink: 0, color: 'text.secondary' }}>{label}</Typography>
+                <Typography sx={{ fontSize: 11, color, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                    {items.length ? items.join(', ') : '—'}
+                </Typography>
+            </Box>
+        );
+        return (
+            <Box sx={{ mb: 1.5, p: 1.25, background: alpha(theme.palette.primary.main, 0.04), borderRadius: radius.sm }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>
+                    {t('quiz.recallResultTitle', {
+                        hits: s.fieldHits.length, total: s.fieldHits.length + s.fieldMisses.length,
+                        defaultValue: `Attributes you recalled: ${s.fieldHits.length} of ${s.fieldHits.length + s.fieldMisses.length}`,
+                    })}
+                </Typography>
+                {line(t('quiz.recallHit', { defaultValue: 'recalled' }), s.fieldHits, theme.palette.success.main)}
+                {line(t('quiz.recallMissed', { defaultValue: 'missed' }), s.fieldMisses, theme.palette.warning.dark)}
+                {line(t('quiz.recallExtra', { defaultValue: 'never charted' }), s.fieldIntrusions, theme.palette.text.disabled)}
+                <Typography sx={{ fontSize: 10.5, color: 'text.disabled', mt: 0.5 }}>
+                    {t('quiz.recallNamedCount', { named: recall.fields.length, seconds: recall.seconds,
+                        defaultValue: `${recall.fields.length} attribute(s) named in ${recall.seconds}s.` })}
+                </Typography>
+            </Box>
+        );
+    };
+
+    /**
+     * How the combinations scored. Same shape as `recallSummary`, and shown in
+     * the same place and for the same reason: naming the real combinations any
+     * earlier would answer the chart questions.
+     */
+    const comboSummary = (combos: ComboAnswer) => {
+        const s = combos.score;
+        const set = (fields: string[]) => fields.join(' × ');
+        const line = (label: string, rows: string[], color: string) => (
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'baseline', mb: 0.25 }}>
+                <Typography sx={{ fontSize: 11, width: 116, flexShrink: 0, color: 'text.secondary' }}>{label}</Typography>
+                <Typography sx={{ fontSize: 11, color, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                    {rows.length ? rows.join(';  ') : '—'}
+                </Typography>
+            </Box>
+        );
+        return (
+            <Box sx={{ mb: 1.5, p: 1.25, background: alpha(theme.palette.secondary.main, 0.05), borderRadius: radius.sm }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>
+                    {t('quiz.comboResultTitle', {
+                        hits: s.hits.length, total: s.hits.length + s.misses.length,
+                        defaultValue: `Combinations you recalled: ${s.hits.length} of ${s.hits.length + s.misses.length}`,
+                    })}
+                </Typography>
+                {line(t('quiz.comboHit', { defaultValue: 'recalled' }), s.hits.map(set), theme.palette.success.main)}
+                {/* A near miss says HOW it was misremembered, so it is reported
+                    next to the combination it was reaching for. */}
+                {line(t('quiz.comboNear', { defaultValue: 'nearly' }),
+                    s.partial.map(p => `${set(p.group)} → ${set(p.closest)}`), theme.palette.warning.dark)}
+                {line(t('quiz.comboMissed', { defaultValue: 'missed' }), s.misses.map(set), theme.palette.warning.dark)}
+                {line(t('quiz.comboExtra', { defaultValue: 'never charted' }), s.intrusions.map(set), theme.palette.text.disabled)}
+                <Typography sx={{ fontSize: 10.5, color: 'text.disabled', mt: 0.5 }}>
+                    {t('quiz.comboNamedCount', { groups: combos.groups.length, seconds: combos.seconds,
+                        defaultValue: `${combos.groups.length} combination(s) built in ${combos.seconds}s.` })}
+                </Typography>
+            </Box>
+        );
+    };
+
+    // ── part 4: reasoning trace ──────────────────────────────────────────
+
+    const traceBackButton = (
+        <Button size="small" onClick={() => setTraceStage('choose')} sx={{ fontSize: 11, textTransform: 'none', color: 'text.secondary' }}>
+            {t('quiz.traceBack', { defaultValue: '← Back to the two forms' })}
+        </Button>
+    );
+
+    const traceBody = () => {
+        const partLabel = (
+            <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', px: 1.5, pt: 1.5 }}>
+                {t('quiz.partFour', { defaultValue: 'Part 4 of 4 — your analysis path' })}
+            </Typography>
+        );
+
+        if (traceStage === 'choose') {
+            const anyDone = !!(traceTreeAnswer || traceThreadAnswer);
+            const formCard = (form: 'tree' | 'thread', title: string, desc: string, done: boolean) => (
+                <Box component="button" onClick={() => handleEnterTrace(form)}
+                    sx={{ textAlign: 'left', p: 1.5, background: '#fff', cursor: 'pointer',
+                          border: `2px solid ${done ? theme.palette.success.main : borderColor.view}`, borderRadius: radius.sm,
+                          transition: 'border-color .12s',
+                          '&:hover': { borderColor: theme.palette.primary.main } }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{title}</Typography>
+                        {done && <CheckCircleOutlineIcon sx={{ fontSize: 15, color: 'success.main' }} />}
+                    </Box>
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>{desc}</Typography>
+                    {done && (
+                        <Typography sx={{ fontSize: 10.5, color: 'text.disabled', mt: 0.5 }}>
+                            {t('quiz.traceRedo', { defaultValue: 'Answered — open again to redo it.' })}
+                        </Typography>
+                    )}
+                </Box>
+            );
+            return (
+                <>
+                    {partLabel}
+                    <Box sx={{ p: 1.5 }}>
+                        <Typography sx={{ fontSize: 12.5, mb: 1 }}>
+                            {t('quiz.traceChooseIntro', { defaultValue:
+                                'Last part: how well do you remember the PATH of your analysis — which chart led to which, and why? Two forms of this question are being piloted; pick one (you can try both).' })}
+                        </Typography>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: wide ? '1fr 1fr' : '1fr', gap: 1.5, mb: 1.5 }}>
+                            {formCard('tree',
+                                t('quiz.traceFormTree', { defaultValue: 'A — Rebuild the map' }),
+                                t('quiz.traceFormTreeDesc', { defaultValue:
+                                    'Your charts, shuffled. Drag them onto a canvas and draw arrows to recreate how one chart led to the next.' }),
+                                !!traceTreeAnswer)}
+                            {formCard('thread',
+                                t('quiz.traceFormThread', { defaultValue: 'B — Walk through the thread' }),
+                                t('quiz.traceFormThreadDesc', { defaultValue:
+                                    'Your charts in the order you made them. Tell us, for each one, what you were after and what you found.' }),
+                                !!traceThreadAnswer)}
+                        </Box>
+                        <Button size="small" variant={anyDone ? 'contained' : 'text'} onClick={() => setTab('results')}
+                            sx={{ fontSize: 12, textTransform: 'none' }}>
+                            {anyDone
+                                ? t('quiz.traceContinue', { defaultValue: 'Continue to results' })
+                                : t('quiz.traceSkip', { defaultValue: 'Skip this part' })}
+                        </Button>
+                    </Box>
+                </>
+            );
+        }
+
+        if (!traceMaterial || traceMaterial === 'loading') {
+            return (
+                <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={14} />
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                        {t('quiz.traceBuilding', { defaultValue: 'Laying out your charts…' })}
+                    </Typography>
+                </Box>
+            );
+        }
+        if (traceMaterial === 'failed') {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'error.main', mb: 1 }}>
+                        {t('quiz.traceFailed', { defaultValue: 'The charts for this part could not be prepared.' })}
+                    </Typography>
+                    {traceBackButton}
+                </Box>
+            );
+        }
+        if (traceStage === 'tree' && traceMaterial.charts.length < 2) {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 1 }}>
+                        {t('quiz.traceTooFew', { defaultValue: 'This session has fewer than two charts, so there is no map to rebuild.' })}
+                    </Typography>
+                    {traceBackButton}
+                </Box>
+            );
+        }
+
+        return (
+            <>
+                <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, pt: 1.5 }}>
+                    <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', flex: 1 }}>
+                        {t('quiz.partFour', { defaultValue: 'Part 4 of 4 — your analysis path' })}
+                    </Typography>
+                    {traceBackButton}
+                </Box>
+                {traceStage === 'tree' ? (
+                    // react-flow needs a real height; the panel's scroll container
+                    // gives its children none.
+                    <Box sx={{ height: wide ? '72vh' : 520, minHeight: 420 }}>
+                        <TraceTreeStep material={traceMaterial} wide={wide}
+                            onDone={a => { setTraceTreeAnswer(a); setTraceStage('choose'); }} />
+                    </Box>
+                ) : (
+                    <TraceWalkthroughStep material={traceMaterial} wide={wide}
+                        onDone={a => { setTraceThreadAnswer(a); setTraceStage('choose'); }} />
+                )}
+            </>
+        );
+    };
+
+    // ── part 1: attribute recall ─────────────────────────────────────────
+
+    const recallBody = () => {
+        if (recallFailed) {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                        {t('quiz.recallUnavailable', { defaultValue: 'The attributes for this session could not be read — go on to the charts.' })}
+                    </Typography>
+                </Box>
+            );
+        }
+        if (!recallMaterial) return generating;
+        return (
+            <>
+                {/* "Part", not "Step": within a chart question, step 1/2 already
+                    means shape-only vs with-text. */}
+                <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', px: 1.5, pt: 1.5 }}>
+                    {t('quiz.partOne', { defaultValue: 'Part 1 of 4 — the attributes' })}
+                </Typography>
+                {/* The tab is always revisitable; pressing continue again just
+                    re-freezes the answer with the current selection. */}
+                <FieldRecallStep
+                    material={recallMaterial}
+                    fields={recallFields}
+                    onChange={setRecallFields}
+                    onContinue={handleFinishRecall}
+                    wide={wide}
+                />
+            </>
+        );
+    };
+
+    // ── part 2: the combinations over those attributes ───────────────────
+
+    const combosBody = () => {
+        if (recallFailed) {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                        {t('quiz.recallUnavailable', { defaultValue: 'The attributes for this session could not be read — go on to the charts.' })}
+                    </Typography>
+                </Box>
+            );
+        }
+        if (!recallMaterial) return generating;
+        return (
+            <>
+                <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', px: 1.5, pt: 1.5 }}>
+                    {t('quiz.partTwo', { defaultValue: 'Part 2 of 4 — the combinations' })}
+                </Typography>
+                {/* The LIVE part-1 selection, not the frozen answer: jumping
+                    straight to this tab must still give a working step. */}
+                <ComboRecallStep
+                    material={recallMaterial}
+                    recalled={recallFields}
+                    groups={comboGroups}
+                    onChange={setComboGroups}
+                    onContinue={handleFinishCombos}
+                    wide={wide}
+                />
+            </>
+        );
+    };
+
+    // ── part 3: chart recognition ────────────────────────────────────────
+
+    const chartsBody = () => {
+        // Generation failed — said here; the results tab still downloads
+        // whatever the other parts produced.
+        if (error) {
+            return (
+                <Box sx={{ p: 1.5 }}>
+                    <Typography sx={{ fontSize: 13, color: 'error.main' }}>{error}</Typography>
+                </Box>
+            );
+        }
         if (!quiz) return generating;
         if (quiz.items.length === 0) {
             return (
@@ -325,81 +734,23 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             );
         }
         if (finished) {
-            const missCount = answers.length - correctCount;
-            const blindCorrect = answers.filter(a => a.blindCorrect).length;
-            const changed = answers.filter(a => a.changedAfterText).length;
             return (
                 <Box sx={{ p: 1.5 }}>
-                    <Typography sx={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
-                        {correctCount}
-                        <Typography component="span" sx={{ fontSize: 14, color: 'text.disabled', fontWeight: 500 }}>
-                            {' '}/ {quiz.items.length} {t('quiz.correctSuffix', { defaultValue: 'correct' })}
-                        </Typography>
+                    <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', mb: 0.75 }}>
+                        {t('quiz.partThree', { defaultValue: 'Part 3 of 4 — the charts' })}
                     </Typography>
-                    <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-                        {missCount === 0
-                            ? t('quiz.noMisses', { defaultValue: 'You recognized every chart.' })
-                            : missCount === 1
-                                ? t('quiz.missesOne', { defaultValue: '1 miss — the look-alike that fooled you is listed below.' })
-                                : t('quiz.missesMany', { count: missCount, defaultValue: `${missCount} misses — the look-alikes that fooled you are listed below.` })}
+                    <Typography sx={{ fontSize: 12.5, mb: 1 }}>
+                        {t('quiz.chartsDone', { count: quiz.items.length,
+                            defaultValue: `All ${quiz.items.length} questions answered.` })}
                     </Typography>
-                    {/* The two-step split: what the shape alone got, and how
-                        often reading the text changed the answer. */}
-                    <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1 }}>
-                        {t('quiz.shapeOnlyScore', { blind: blindCorrect, total: quiz.items.length,
-                            defaultValue: `From shape alone (step 1): ${blindCorrect} / ${quiz.items.length}.` })}
-                        {' '}
-                        {changed === 0
-                            ? t('quiz.changedNone', { defaultValue: 'The text never changed your mind.' })
-                            : t('quiz.changedSome', { count: changed,
-                                defaultValue: `The text changed your answer on ${changed} of them.` })}
-                    </Typography>
-                    <Box sx={{ overflowX: 'auto' }}>
-                        <Table size="small">
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>#</TableCell>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChart', { defaultValue: 'Chart' })}</TableCell>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colShape', { defaultValue: 'Shape only' })}</TableCell>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colResult', { defaultValue: 'With text' })}</TableCell>
-                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChosen', { defaultValue: 'If missed: look-alike chosen' })}</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {answers.map(a => (
-                                    <TableRow key={a.n}>
-                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.n}</TableCell>
-                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.title}</TableCell>
-                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>
-                                            {a.blindCorrect
-                                                ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
-                                                : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>
-                                            {a.correct
-                                                ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
-                                                : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
-                                            {a.changedAfterText && (
-                                                <Typography component="span" sx={{ fontSize: 9.5, color: 'text.disabled', ml: 0.5 }}>
-                                                    {t('quiz.changedTag', { defaultValue: 'changed' })}
-                                                </Typography>
-                                            )}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: 11, px: 0.5, color: 'text.secondary' }}>
-                                            {a.correct ? '—' : `${a.label ?? ''} (${a.specDist}, ${a.dataDist})`}
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </Box>
-                    <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
-                        <Button size="small" startIcon={<DownloadIcon sx={{ fontSize: 15 }} />} onClick={handleDownload} sx={{ fontSize: 12, textTransform: 'none' }}>
-                            {t('quiz.download', { defaultValue: 'Download answers' })}
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        <Button size="small" variant="contained" onClick={() => setTab('trace')} sx={{ fontSize: 12, textTransform: 'none' }}>
+                            {t('quiz.goToTrace', { defaultValue: 'On to part 4' })}
                         </Button>
-                        <Button size="small" startIcon={<ReplayIcon sx={{ fontSize: 15 }} />}
-                            onClick={() => { setIndex(0); setAnswers([]); setPhase('blind'); setBlindPick(null); setPicked(null); setFinished(false); }}
-                            sx={{ fontSize: 12, textTransform: 'none' }}>
+                        <Button size="small" onClick={() => setTab('results')} sx={{ fontSize: 12, textTransform: 'none' }}>
+                            {t('quiz.seeResults', { defaultValue: 'See results' })}
+                        </Button>
+                        <Button size="small" startIcon={<ReplayIcon sx={{ fontSize: 15 }} />} onClick={handleRetake} sx={{ fontSize: 12, textTransform: 'none' }}>
                             {t('quiz.again', { defaultValue: 'Take it again' })}
                         </Button>
                     </Box>
@@ -410,6 +761,9 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         const gotIt = picked === item!.correctId;
         return (
             <Box sx={{ p: 1.5 }}>
+                <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em', color: 'primary.main', mb: 0.75 }}>
+                    {t('quiz.partThree', { defaultValue: 'Part 3 of 4 — the charts' })}
+                </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                     <LinearProgress variant="determinate" value={(100 * index) / quiz.items.length}
                         sx={{ flex: 1, height: 5, borderRadius: 99 }} />
@@ -458,12 +812,154 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 {phase === 'revealed' && (
                     <Button size="small" variant="contained" onClick={handleNext} sx={{ fontSize: 12, textTransform: 'none' }}>
                         {index + 1 >= quiz.items.length
-                            ? t('quiz.seeResults', { defaultValue: 'See results' })
+                            ? t('quiz.toPartFour', { defaultValue: 'On to part 4' })
                             : t('quiz.next', { defaultValue: 'Next' })}
                     </Button>
                 )}
             </Box>
         );
+    };
+
+    // ── results (live: shows whatever has been answered so far) ──────────
+
+    const resultsBody = () => {
+        const total = quiz?.items.length ?? 0;
+        const nothingYet = answers.length === 0 && !recallAnswer && !comboAnswer && !traceTreeAnswer && !traceThreadAnswer;
+        if (nothingYet) {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                        {t('quiz.noResultsYet', { defaultValue: 'Nothing answered yet — results appear here as you complete the parts.' })}
+                    </Typography>
+                </Box>
+            );
+        }
+        {
+            const missCount = answers.length - correctCount;
+            const blindCorrect = answers.filter(a => a.blindCorrect).length;
+            const changed = answers.filter(a => a.changedAfterText).length;
+            return (
+                <Box sx={{ p: 1.5 }}>
+                    {/* The tab is reachable mid-part-3, so everything here is
+                        scored against what has been ANSWERED, not the item
+                        count, and unfinished progress is said out loud. */}
+                    {answers.length > 0 && (
+                        <>
+                            <Typography sx={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+                                {correctCount}
+                                <Typography component="span" sx={{ fontSize: 14, color: 'text.disabled', fontWeight: 500 }}>
+                                    {' '}/ {answers.length} {t('quiz.correctSuffix', { defaultValue: 'correct' })}
+                                </Typography>
+                            </Typography>
+                            {!finished && total > 0 && (
+                                <Typography sx={{ fontSize: 11.5, color: 'warning.dark', mt: 0.25 }}>
+                                    {t('quiz.partialAnswers', { done: answers.length, total,
+                                        defaultValue: `Part 3 is still underway — ${answers.length} of ${total} questions answered so far.` })}
+                                </Typography>
+                            )}
+                            <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
+                                {missCount === 0
+                                    ? (finished ? t('quiz.noMisses', { defaultValue: 'You recognized every chart.' }) : '')
+                                    : missCount === 1
+                                        ? t('quiz.missesOne', { defaultValue: '1 miss — the look-alike that fooled you is listed below.' })
+                                        : t('quiz.missesMany', { count: missCount, defaultValue: `${missCount} misses — the look-alikes that fooled you are listed below.` })}
+                            </Typography>
+                            {/* The two-step split: what the shape alone got, and how
+                                often reading the text changed the answer. */}
+                            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1 }}>
+                                {t('quiz.shapeOnlyScore', { blind: blindCorrect, total: answers.length,
+                                    defaultValue: `From shape alone (step 1): ${blindCorrect} / ${answers.length}.` })}
+                                {' '}
+                                {changed === 0
+                                    ? t('quiz.changedNone', { defaultValue: 'The text never changed your mind.' })
+                                    : t('quiz.changedSome', { count: changed,
+                                        defaultValue: `The text changed your answer on ${changed} of them.` })}
+                            </Typography>
+                        </>
+                    )}
+                    {recallAnswer && recallSummary(recallAnswer)}
+                    {comboAnswer && comboSummary(comboAnswer)}
+                    {/* part 4, when it was answered: the map score and/or the
+                        walkthrough, now that revealing structure costs nothing */}
+                    {(traceTreeAnswer || traceThreadAnswer) && (
+                        <Box sx={{ mb: 1.5, p: 1.25, background: alpha(theme.palette.primary.main, 0.04), borderRadius: radius.sm }}>
+                            <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>
+                                {t('quiz.traceResultTitle', { defaultValue: 'Your analysis path' })}
+                            </Typography>
+                            {traceTreeAnswer && (
+                                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                                    {t('quiz.traceTreeResult', {
+                                        hits: traceTreeAnswer.score.hits,
+                                        total: traceTreeAnswer.score.hits + traceTreeAnswer.score.misses,
+                                        extras: traceTreeAnswer.score.extras,
+                                        seconds: traceTreeAnswer.seconds,
+                                        defaultValue: `Map: ${traceTreeAnswer.score.hits} of ${traceTreeAnswer.score.hits + traceTreeAnswer.score.misses} links rebuilt correctly, ${traceTreeAnswer.score.extras} link(s) that never happened · ${traceTreeAnswer.seconds}s.`,
+                                    })}
+                                </Typography>
+                            )}
+                            {traceThreadAnswer && (
+                                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                                    {t('quiz.traceThreadResult', {
+                                        count: traceThreadAnswer.entries.length,
+                                        seconds: traceThreadAnswer.seconds,
+                                        defaultValue: `Walkthrough: ${traceThreadAnswer.entries.length} step(s) narrated in ${traceThreadAnswer.seconds}s — compared against your real prompts in the downloaded file.`,
+                                    })}
+                                </Typography>
+                            )}
+                        </Box>
+                    )}
+                    {answers.length > 0 && <Box sx={{ overflowX: 'auto' }}>
+                        <Table size="small">
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>#</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChart', { defaultValue: 'Chart' })}</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colShape', { defaultValue: 'Shape only' })}</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colResult', { defaultValue: 'With text' })}</TableCell>
+                                    <TableCell sx={{ fontSize: 10, px: 0.5 }}>{t('quiz.colChosen', { defaultValue: 'If missed: look-alike chosen' })}</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {answers.map(a => (
+                                    <TableRow key={a.n}>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.n}</TableCell>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>{a.title}</TableCell>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>
+                                            {a.blindCorrect
+                                                ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                                                : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5 }}>
+                                            {a.correct
+                                                ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                                                : <HighlightOffIcon sx={{ fontSize: 14, color: 'error.main' }} />}
+                                            {a.changedAfterText && (
+                                                <Typography component="span" sx={{ fontSize: 9.5, color: 'text.disabled', ml: 0.5 }}>
+                                                    {t('quiz.changedTag', { defaultValue: 'changed' })}
+                                                </Typography>
+                                            )}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: 11, px: 0.5, color: 'text.secondary' }}>
+                                            {a.correct ? '—' : `${a.label ?? ''} (${a.specDist}, ${a.dataDist})`}
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </Box>}
+                    <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
+                        <Button size="small" startIcon={<DownloadIcon sx={{ fontSize: 15 }} />} onClick={handleDownload} sx={{ fontSize: 12, textTransform: 'none' }}>
+                            {t('quiz.download', { defaultValue: 'Download answers' })}
+                        </Button>
+                        <Button size="small" startIcon={<ReplayIcon sx={{ fontSize: 15 }} />}
+                            onClick={handleRetake}
+                            sx={{ fontSize: 12, textTransform: 'none' }}>
+                            {t('quiz.again', { defaultValue: 'Take it again' })}
+                        </Button>
+                    </Box>
+                </Box>
+            );
+        }
     };
 
     // ── author mode ──────────────────────────────────────────────────────
@@ -606,9 +1102,18 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             {tabs}
             <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
                 <Box sx={{ maxWidth: size.maxW, mx: 'auto', width: '100%' }}>
-                    {error
+                    {/* Author mode is nothing but the generated look-alikes, so a
+                        failure there is terminal. The part tabs handle their own
+                        error cases — parts 1, 2 and 4 need no look-alikes and stay
+                        answerable, and reportable, without them. */}
+                    {error && tab === 'author'
                         ? <Box sx={{ p: 2 }}><Typography sx={{ fontSize: 13, color: 'error.main' }}>{error}</Typography></Box>
-                        : mode === 'quiz' ? quizBody() : authorBody()}
+                        : tab === 'recall' ? recallBody()
+                        : tab === 'combos' ? combosBody()
+                        : tab === 'charts' ? chartsBody()
+                        : tab === 'trace' ? traceBody()
+                        : tab === 'results' ? resultsBody()
+                        : authorBody()}
                 </Box>
             </Box>
         </Box>

@@ -233,6 +233,50 @@ const LanguageSwitcher: React.FC = () => {
     );
 };
 
+// Study-condition switcher (user study): an Executor/Analyst toggle pinned in
+// the app bar, so the researcher flips conditions without opening Settings.
+// Redux-driven (no local copy of the value), so it always shows the active
+// condition — including after loading a saved session, which overwrites
+// config.studyCondition (the old Settings radio kept a stale useState there).
+// The Default condition is deliberately not offered: study sessions run as one
+// of the two study conditions, and a legacy 'default' state shows neither
+// button selected until a condition is assigned.
+const StudyConditionToggle: React.FC = () => {
+    const { t } = useTranslation();
+    const dispatch = useDispatch();
+    const config = useSelector((state: DataFormulatorState) => state.config);
+    const condition = config.studyCondition ?? 'default';
+
+    return (
+        <Tooltip title={t('config.studyMode')}>
+            <ToggleButtonGroup
+                value={condition === 'default' ? null : condition}
+                exclusive
+                onChange={(_, value) => {
+                    // null = clicking the active button again; ignore rather than
+                    // deselect, so a session can't drop back to the hidden Default.
+                    if (value) dispatch(dfActions.setConfig({ ...config, studyCondition: value }));
+                }}
+                size="small"
+                sx={{
+                    height: '28px',
+                    my: 'auto',
+                    mr: 1,
+                    '& .MuiToggleButton-root': {
+                        textTransform: 'none',
+                        fontSize: '12px',
+                        py: 0,
+                        px: 1.25,
+                    },
+                }}
+            >
+                <ToggleButton value="executor">{t('config.studyModeExecutor')}</ToggleButton>
+                <ToggleButton value="analyst">{t('config.studyModeAnalyst')}</ToggleButton>
+            </ToggleButtonGroup>
+        </Tooltip>
+    );
+};
+
 export interface AppFCProps {
 }
 
@@ -505,14 +549,11 @@ const ConfigDialog: React.FC = () => {
     const [paletteKey, setPaletteKey] = useState(
         (config.paletteKey && palettes[config.paletteKey]) ? config.paletteKey : defaultPaletteKey
     );
-    const [studyCondition, setStudyCondition] = useState<'default' | 'executor' | 'analyst'>(config.studyCondition ?? 'default');
-
     const hasChanges = formulateTimeoutSeconds !== config.formulateTimeoutSeconds ||
                       defaultChartWidth !== config.defaultChartWidth ||
                       defaultChartHeight !== config.defaultChartHeight ||
                       maxStretchFactor !== config.maxStretchFactor ||
                       frontendRowLimit !== config.frontendRowLimit ||
-                      studyCondition !== (config.studyCondition ?? 'default') ||
                       paletteKey !== ((config.paletteKey && palettes[config.paletteKey]) ? config.paletteKey : defaultPaletteKey);
 
     return (
@@ -701,21 +742,9 @@ const ConfigDialog: React.FC = () => {
                                 </Typography>
                             </Box>
                         </Box>
-                        <Divider><Typography variant="caption">{t('config.studyMode')}</Typography></Divider>
-                        <FormControl sx={{ display: 'block' }}>
-                            <RadioGroup
-                                row
-                                value={studyCondition}
-                                onChange={(e) => setStudyCondition(e.target.value as 'default' | 'executor' | 'analyst')}
-                            >
-                                <FormControlLabel value="default" control={<Radio size="small" />}
-                                    label={<Typography variant="body2">{t('config.studyModeDefault')}</Typography>} />
-                                <FormControlLabel value="executor" control={<Radio size="small" />}
-                                    label={<Typography variant="body2">{t('config.studyModeExecutor')}</Typography>} />
-                                <FormControlLabel value="analyst" control={<Radio size="small" />}
-                                    label={<Typography variant="body2">{t('config.studyModeAnalyst')}</Typography>} />
-                            </RadioGroup>
-                        </FormControl>
+                        {/* Study condition moved out of Settings: it is the app-bar
+                            Executor/Analyst toggle (StudyConditionToggle), redux-driven
+                            and with the Default condition hidden for the study. */}
                         <Divider><Typography variant="caption">{t('analysisGraph.title')}</Typography></Divider>
                         <Box>
                             <Button
@@ -744,7 +773,8 @@ const ConfigDialog: React.FC = () => {
                         setMaxStretchFactor(2.0);
                         setFrontendRowLimit(rowLimitDefault);
                         setPaletteKey(defaultPaletteKey);
-                        setStudyCondition('default');
+                        // The study condition is deliberately NOT reset here — condition
+                        // assignment lives on the app-bar toggle, outside this dialog.
                     }}>{t('session.resetToDefault')}</Button>
                     <Button onClick={() => setOpen(false)}>{t('app.cancel')}</Button>
                     <Button 
@@ -755,7 +785,10 @@ const ConfigDialog: React.FC = () => {
                             || isNaN(maxStretchFactor) || maxStretchFactor < 1 || maxStretchFactor > 5
                             || isNaN(frontendRowLimit) || frontendRowLimit < 100 || frontendRowLimit > rowLimitMax}
                         onClick={() => {
-                            dispatch(dfActions.setConfig({formulateTimeoutSeconds, defaultChartWidth, defaultChartHeight, maxStretchFactor, frontendRowLimit, paletteKey, miniMode: config.miniMode ?? false, studyCondition}));
+                            // setConfig REPLACES the whole config object, so the study
+                            // condition (owned by the app-bar toggle) is passed through
+                            // unchanged — Apply must not clobber it.
+                            dispatch(dfActions.setConfig({formulateTimeoutSeconds, defaultChartWidth, defaultChartHeight, maxStretchFactor, frontendRowLimit, paletteKey, miniMode: config.miniMode ?? false, studyCondition: config.studyCondition ?? 'default'}));
                             setOpen(false);
                         }}
                     >
@@ -889,6 +922,8 @@ const AppShell: FC = () => {
                         )}
                         {isAppPage && (
                             <Box sx={{ display: 'flex', ml: 'auto', fontSize: 14, alignItems: 'center' }}>
+                                <StudyConditionToggle />
+                                <Divider orientation="vertical" variant="middle" flexItem />
                                 <LanguageSwitcher />
                                 <ConfigDialog />
                                 <Divider orientation="vertical" variant="middle" flexItem />

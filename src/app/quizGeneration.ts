@@ -23,6 +23,7 @@ import {
 } from '../lib/quiz-distractors';
 import { renderVegaLiteToSvg } from './vegaRender';
 import { loadWorkspace } from './workspaceService';
+import { readRecallMaterial, ComboAnswer, RecallAnswer, RecallMaterial } from './fieldRecall';
 
 export interface GeneratedQuiz {
     sessionId: string;
@@ -87,8 +88,12 @@ function thawRows(state: any): any {
  * The session's charts, from live state when it is the open session and from
  * storage otherwise. Reading a stored session is a pure read — it does not
  * switch the user's active session.
+ *
+ * Exported for reasoningTrace, which needs the same state (with the same row
+ * thaw — its charts render through vega too) plus the derive lineage that
+ * `extractSession` drops.
  */
-async function resolveSession(sessionId: string, liveState: unknown) {
+export async function resolveSessionState(sessionId: string, liveState: unknown) {
     let stateLike: any = liveState;
     if (!stateLike) {
         const loaded = await loadWorkspace(sessionId);
@@ -97,7 +102,22 @@ async function resolveSession(sessionId: string, liveState: unknown) {
         }
         stateLike = loaded.state;
     }
-    return extractSession(thawRows(stateLike));
+    return thawRows(stateLike);
+}
+
+async function resolveSession(sessionId: string, liveState: unknown) {
+    return extractSession(await resolveSessionState(sessionId, liveState));
+}
+
+/**
+ * The material for the field-recall step: the table the participant started
+ * from, the attributes available to them, and what their charts encoded.
+ *
+ * Separate from `generateQuizForSession` because it needs no rendering — the
+ * step can be answered while the look-alike charts are still being made.
+ */
+export async function loadRecallMaterial(args: { sessionId: string; liveState?: unknown }): Promise<RecallMaterial> {
+    return readRecallMaterial(await resolveSessionState(args.sessionId, args.liveState));
 }
 
 /** Render a spec, reporting a failure rather than throwing: a chart that will
@@ -160,9 +180,10 @@ export interface AuthorViewArgs {
 }
 
 /**
- * Build the author view for a single chart: every method's look-alikes with the
- * operations behind them. One chart at a time, on demand — rendering a whole
- * session's methods at once is hundreds of charts and would stall the panel.
+ * Build the author view for a single chart: each axis's look-alikes (form,
+ * content, combined) with the operations behind them. One chart at a time, on
+ * demand — rendering a whole session's lures at once is hundreds of charts and
+ * would stall the panel.
  */
 export async function authorViewForChart(args: AuthorViewArgs): Promise<AuthoredChart | null> {
     const { sessionId, liveState, chartId, seed = DEFAULT_SEED } = args;
@@ -199,8 +220,10 @@ export interface QuizAnswer {
     /** did seeing the text change the answer? */
     changedAfterText: boolean;
 
-    /** set only on a final miss: which method produced the chosen look-alike */
+    /** set only on a final miss: which axis produced the chosen look-alike (form / content / combined) */
     method?: string;
+    /** the specific operation behind it, e.g. 'mark', 'sort-value', 'perturb-invert' */
+    op?: string;
     label?: string;
     /** the misrecall distances: how far the chosen look-alike sat from the real chart */
     specDist?: number;
@@ -215,9 +238,16 @@ export interface QuizResult {
     total: number;
     correct: number;
     answers: QuizAnswer[];
+    /** part 1: the attributes named, and how they scored (absent if skipped) */
+    recall?: RecallAnswer;
+    /** part 2: the combinations they were grouped into (absent if skipped) */
+    combos?: ComboAnswer;
 }
 
-export function buildQuizResult(quiz: GeneratedQuiz, answers: QuizAnswer[], completedAt: string): QuizResult {
+export function buildQuizResult(
+    quiz: GeneratedQuiz, answers: QuizAnswer[], completedAt: string,
+    recall?: RecallAnswer, combos?: ComboAnswer,
+): QuizResult {
     return {
         sessionId: quiz.sessionId,
         sessionName: quiz.sessionName,
@@ -226,5 +256,7 @@ export function buildQuizResult(quiz: GeneratedQuiz, answers: QuizAnswer[], comp
         total: quiz.items.length,
         correct: answers.filter(a => a.correct).length,
         answers,
+        recall,
+        combos,
     };
 }

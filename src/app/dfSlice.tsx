@@ -124,19 +124,15 @@ export interface ChartUsageEntry {
 }
 
 /**
- * Study telemetry: one entry per successful "add chart to report" click, in
- * order. Persisted with the workspace alongside `chartUsage`.
- *
- * `prefilled` marks adds whose takeaway text was seeded from the agent's
- * chart caption (describe_chart) rather than the empty placeholder;
- * `prefillText` snapshots that seed so post-hoc analysis can diff the final
- * report against it (kept verbatim / edited / deleted).
+ * Study telemetry: one entry per add/remove on the "My findings" panel, in
+ * order. Persisted with the workspace alongside `chartUsage`. Final membership
+ * lives in `findingsChartIds`; this is the ordered history behind it.
  */
 export interface ReportChartAddEntry {
     chartId: string;
     at: number;
-    prefilled?: boolean;
-    prefillText?: string;
+    /** 'add' | 'remove' — absent on pre-findings-panel entries, which were all adds. */
+    kind?: 'add' | 'remove';
 }
 
 export const DEFAULT_ROW_LIMIT = 2_000_000;
@@ -150,7 +146,7 @@ export interface ClientConfig {
     frontendRowLimit: number; // max rows to keep in browser when loading locally (non-virtual)
     paletteKey: string; // active color palette key from tokens.ts
     miniMode: boolean; // when true, run the single-turn MiniAnalystAgent (for small/local models)
-    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained (user makes every analytical decision, no suggestion strip); 'analyst' = agent-supported (Level-3 chart captions + the persistent next-step suggestion strip, auto-refreshed after each charting run)
+    studyCondition: 'default' | 'executor' | 'analyst'; // user-study condition: 'default' = existing behavior; 'executor' = constrained (user makes every analytical decision, no suggestion strip); 'analyst' = agent-supported (adds the persistent next-step suggestion strip, auto-refreshed after each charting run). The suggestion strip is the SOLE between-condition difference: per-chart agent captions were removed entirely, so all interpretation is left to the participant
 }
 
 export interface GeneratedReport {
@@ -256,8 +252,15 @@ export interface DataFormulatorState {
     /** Passive per-chart viewing telemetry (see ChartUsageEntry). */
     chartUsage: Record<string, ChartUsageEntry>;
 
-    /** Study telemetry: ordered "add chart to report" events (see ReportChartAddEntry). */
+    /** Study telemetry: ordered add/remove events on the findings collection (see ReportChartAddEntry). */
     reportChartAdds: ReportChartAddEntry[];
+
+    /**
+     * "My findings" panel membership (user study): ordered chart ids the
+     * participant has selected. First-class state (not derived from report
+     * content) — the panel is a plain chart collection, not a document.
+     */
+    findingsChartIds: string[];
 
     viewMode: 'editor' | 'report';
 
@@ -385,6 +388,7 @@ const initialState: DataFormulatorState = {
     focusedReportId: undefined,
     chartUsage: {},
     reportChartAdds: [],
+    findingsChartIds: [],
 
     viewMode: 'editor',
 
@@ -538,6 +542,13 @@ let deleteChartsRoutine = (state: DataFormulatorState, chartIds: string[]) => {
         for (const id of chartIds) {
             delete state.chartThumbnails[id];
         }
+    }
+
+    // Drop removed charts from the findings collection so the panel never
+    // points at dead charts. Deliberately NOT logged to reportChartAdds:
+    // deleting a chart is not a findings decision.
+    if (state.findingsChartIds?.length) {
+        state.findingsChartIds = state.findingsChartIds.filter(id => !chartIds.includes(id));
     }
 
     // update focusedChart and activeThreadChart
@@ -869,6 +880,7 @@ export const dataFormulatorSlice = createSlice({
             state.focusedReportId = undefined;
             state.chartUsage = {};
             state.reportChartAdds = [];
+            state.findingsChartIds = [];
 
             state.viewMode = 'editor';
 
@@ -1031,6 +1043,7 @@ export const dataFormulatorSlice = createSlice({
                     ?? (saved.focusedId?.type === 'report' ? saved.focusedId.reportId : undefined),
                 chartUsage: saved.chartUsage || {},
                 reportChartAdds: saved.reportChartAdds || [],
+                findingsChartIds: saved.findingsChartIds || [],
                 config: { ...initialState.config, ...(saved.config || {}) },
                 dataCleanBlocks: saved.dataCleanBlocks || [],
                 dataLoadingChatMessages: saved.dataLoadingChatMessages || [],
@@ -1461,18 +1474,6 @@ export const dataFormulatorSlice = createSlice({
             let chart = collectAllCharts(state).find(c => c.id == action.payload.chartId);
             if (chart) {
                 chart.scaleFactor = action.payload.scaleFactor === 1 ? undefined : action.payload.scaleFactor;
-            }
-        },
-        // Study modes: the agent's describe_chart action attaches a per-chart
-        // caption (executor: computed data facts; analyst: perceived pattern).
-        // Stored on the Chart like `title`, with the same staleness key, so it
-        // persists with the session and hides once the user edits the chart's
-        // encodings. Re-describing the same chart replaces the caption.
-        setChartDescription: (state, action: PayloadAction<{chartId: string, description: string, descriptionKey?: string}>) => {
-            let chart = collectAllCharts(state).find(c => c.id == action.payload.chartId);
-            if (chart) {
-                chart.description = action.payload.description;
-                chart.descriptionKey = action.payload.descriptionKey;
             }
         },
         // --- Style variants (see design-docs/28-chart-style-refinement-agent.md) ---
@@ -2061,6 +2062,27 @@ export const dataFormulatorSlice = createSlice({
             }
         },
         /**
+         * (User study) Add a chart to the "My findings" panel — the plain
+         * chart collection that replaced the participant-authored report.
+         * Idempotent.
+         */
+        addChartToFindings: (state, action: PayloadAction<{ chartId: string }>) => {
+            const { chartId } = action.payload;
+            if (!state.findingsChartIds) state.findingsChartIds = [];   // pre-feature persisted states
+            if (state.findingsChartIds.includes(chartId)) return;
+            state.findingsChartIds.push(chartId);
+            if (!state.reportChartAdds) state.reportChartAdds = [];
+            state.reportChartAdds.push({ chartId, at: Date.now(), kind: 'add' });
+        },
+        /** (User study) Remove a chart from the "My findings" panel. Logged. */
+        removeChartFromFindings: (state, action: PayloadAction<{ chartId: string }>) => {
+            const { chartId } = action.payload;
+            if (!state.findingsChartIds?.includes(chartId)) return;
+            state.findingsChartIds = state.findingsChartIds.filter(id => id !== chartId);
+            if (!state.reportChartAdds) state.reportChartAdds = [];
+            state.reportChartAdds.push({ chartId, at: Date.now(), kind: 'remove' });
+        },
+        /**
          * Append a chart section (heading + embed + takeaway) to a report —
          * the participant findings report in the study conditions. The
          * takeaway paragraph is the agent's chart caption when one exists
@@ -2106,11 +2128,7 @@ export const dataFormulatorSlice = createSlice({
             report.updatedAt = Date.now();   // drives ReportView's external-refresh effect
 
             if (!state.reportChartAdds) state.reportChartAdds = [];   // pre-feature persisted states
-            state.reportChartAdds.push({
-                chartId, at: Date.now(),
-                prefilled: !!takeaway,
-                ...(takeaway ? { prefillText: takeaway } : {}),
-            });
+            state.reportChartAdds.push({ chartId, at: Date.now(), kind: 'add' });
         },
         updateGeneratedReportProgress: (state, action: PayloadAction<{ id: string; kind: 'start' | 'end'; label?: string; doneLabel?: string; charts?: { chartType: string; name: string }[] }>) => {
             const { id, kind, label, doneLabel, charts } = action.payload;

@@ -54,9 +54,9 @@ const FAMILY = {
 const famOf = (t) => FAMILY[t] ?? 'other';
 
 const METHOD_NAME = {
-    'enumeration': 'Enumeration', 'graphscape': 'GraphScape walk',
-    'data-perturb': 'Data perturbation', 'sibling-measure': 'Sibling measure',
-    'session-hybrid': 'Session hybrid',
+    'form': 'Form (drawn differently)',
+    'content': 'Content (data says something else)',
+    'combined': 'Combined (both at once)',
 };
 
 // ── build the question set ────────────────────────────────────────────────

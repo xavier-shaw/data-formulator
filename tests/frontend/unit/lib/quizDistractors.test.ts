@@ -8,8 +8,8 @@ import {
     renderHash,
     degenerateText,
     stripSvgText,
+    generateAll,
     QUIZ_METHODS,
-    chartFamily,
     LURES_PER_ITEM,
 } from '../../../../src/lib/quiz-distractors';
 
@@ -177,12 +177,14 @@ describe('buildQuizItems', () => {
         expect(verifyQuizItems(items)).toEqual([]);
     });
 
-    it('draws lures only from the allowed methods', async () => {
+    it('gives every item exactly one lure per axis: form, content, combined', async () => {
         const session = extractSession(makeState());
         const { items } = await buildQuizItems({ session, render: fakeRender });
-        const methods = items.flatMap(i => i.options.map(o => o.method).filter(Boolean));
-        expect(methods.length).toBeGreaterThan(0);
-        for (const m of methods) expect(QUIZ_METHODS.has(m as any)).toBe(true);
+        expect(items.length).toBeGreaterThan(0);
+        for (const item of items) {
+            const lures = item.options.filter(o => o.method);
+            expect(lures.map(o => o.method).sort()).toEqual([...QUIZ_METHODS].sort());
+        }
     });
 
     it('rejects a lure that only differs in text, since step 1 hides text', async () => {
@@ -194,7 +196,7 @@ describe('buildQuizItems', () => {
         const textOnlyRender = async () => `<svg><path d="M0,0"/><text>${n++}</text></svg>`;
         const { items, skipped } = await buildQuizItems({ session, render: textOnlyRender });
         expect(items).toHaveLength(0);
-        expect(skipped[0].reason).toMatch(/usable look-alike/);
+        expect(skipped[0].reason).toMatch(/no usable \w+ look-alike/);
     });
 
     it('drops a lure that renders like the original rather than shipping two right answers', async () => {
@@ -203,38 +205,51 @@ describe('buildQuizItems', () => {
         const constant = async () => '<svg><text>same</text></svg>';
         const { items, skipped } = await buildQuizItems({ session, render: constant });
         expect(items).toHaveLength(0);
-        expect(skipped[0].reason).toMatch(/usable look-alike/);
+        expect(skipped[0].reason).toMatch(/no usable \w+ look-alike/);
     });
 
-    it('can ask about a chart type no other form reaches, because perturbation keeps the form', async () => {
+    it('makes the combined lure the composition of THIS item\'s own A and B', async () => {
+        // The item is a 2×2 — original, A, B, A+B — so a wrong pick says which
+        // axis failed and the combined option says whether either alone
+        // sufficed. An independently drawn pair would not support that reading.
         const session = extractSession(makeState());
-        // A map used to be skipped as a giveaway: the only lures available were
-        // bars and lines, so the one map on screen was obviously the answer.
-        // Data perturbation keeps the chart type and changes the values, so it
-        // supplies same-family lures and the question becomes fair.
-        session.charts[0].spec.chartType = 'US Map';
         const { items } = await buildQuizItems({ session, render: fakeRender });
-        expect(items).toHaveLength(1);
-        // The options are a mix — the nearest lures are cheap form edits — but at
-        // least one keeps the map form, which is what makes the item fair.
-        const lures = items[0].options.filter(o => o.id !== items[0].correctId);
-        expect(lures.some(o => chartFamily(o.chartType) === chartFamily('US Map'))).toBe(true);
+        expect(items.length).toBeGreaterThan(0);
+        for (const item of items) {
+            const a = item.options.find(o => o.method === 'form')!;
+            const b = item.options.find(o => o.method === 'content')!;
+            const ab = item.options.find(o => o.method === 'combined')!;
+            expect(ab.composedOf).toEqual([a.id, b.id]);
+            expect(ab.op).toBe(`${a.op}+${b.op}`);
+            expect(ab.label).toBe(`${a.label} + ${b.label}`);
+        }
     });
 
-    it('still skips a chart when no surviving lure shares its family', async () => {
-        // A constant measure leaves data perturbation nothing to change: every
-        // variant it computes is numerically identical, so all of them render
-        // like the original and are dropped. (The label-substitution variant
-        // needs a source table for its pool; this fixture has only a derived
-        // one.) What remains are cross-family form edits — the exact case the
-        // fairness rule exists to catch.
-        const flat = makeState();
-        flat.tables[0].rows = flat.tables[0].rows.map(r => ({ ...r, rate: 0.2 }));
-        const session = extractSession(flat);
-        session.charts[0].spec.chartType = 'US Map';
-        const { items, skipped } = await buildQuizItems({ session, render: fakeRender });
-        expect(items).toHaveLength(0);
-        expect(skipped.map(s => s.reason).join(' ')).toMatch(/family|usable look-alike/);
+    it('rejects an item whose combined lure is not made of its own A and B', () => {
+        const item = {
+            chartId: 'c', title: 'T', chartType: 'Bar Chart', focusMs: 0, correctId: 'c_orig',
+            options: [
+                { id: 'c_orig', svg: '<svg>0</svg>', chartType: 'Bar Chart' },
+                { id: 'c_a', svg: '<svg>1</svg>', chartType: 'Bar Chart', method: 'form', op: 'mark' },
+                { id: 'c_b', svg: '<svg>2</svg>', chartType: 'Bar Chart', method: 'content', op: 'filter' },
+                // composed from some OTHER content edit than this item's B
+                { id: 'c_ab', svg: '<svg>3</svg>', chartType: 'Bar Chart', method: 'combined',
+                  op: 'mark+sort-value', composedOf: ['c_a', 'c_other'] },
+            ],
+        };
+        expect(verifyQuizItems([item] as any).join(' ')).toMatch(/does not name this item|is not "mark\+filter"/);
+    });
+
+    it('never lets the correct answer be the only chart of its kind on screen', async () => {
+        // The old chart-family fairness guard is now satisfied by construction:
+        // the content lure keeps the original's chart type exactly, so every
+        // item carries at least one same-type option besides the answer.
+        const session = extractSession(makeState());
+        const { items } = await buildQuizItems({ session, render: fakeRender });
+        for (const item of items) {
+            const content = item.options.find(o => o.method === 'content')!;
+            expect(content.chartType).toBe(item.chartType);
+        }
     });
 
     it('reports a chart whose original will not render', async () => {
@@ -306,10 +321,28 @@ describe('verifyQuizItems', () => {
     });
 });
 
-describe('chartFamily', () => {
-    it('groups look-alike chart types and separates remote ones', () => {
-        expect(chartFamily('Bar Chart')).toBe(chartFamily('Grouped Bar Chart'));
-        expect(chartFamily('Line Chart')).toBe(chartFamily('Area Chart'));
-        expect(chartFamily('US Map')).not.toBe(chartFamily('Bar Chart'));
+describe('axis purity', () => {
+    // The lure's axis is the MEANING of a wrong answer, so each axis must only
+    // change what it claims to change.
+    it('form lures keep the data; content lures keep the drawing', () => {
+        const session = extractSession(makeState());
+        const chart = session.charts[0];
+        const candidates = withSeededRandom(1, () => generateAll(chart, session));
+
+        const byMethod = (m: string) => candidates.filter(c => c.method === m);
+        expect(byMethod('form').length).toBeGreaterThan(0);
+        expect(byMethod('content').length).toBeGreaterThan(0);
+        expect(byMethod('combined').length).toBeGreaterThan(0);
+
+        for (const c of byMethod('form')) {
+            // same row array by IDENTITY — the data is untouched
+            expect(c.rows).toBe(chart.rows);
+        }
+        const fieldMap = (spec: any) =>
+            Object.fromEntries(Object.entries(spec.encodings).map(([ch, e]: any) => [ch, e.field]));
+        for (const c of byMethod('content')) {
+            expect(c.spec.chartType).toBe(chart.spec.chartType);
+            expect(fieldMap(c.spec)).toEqual(fieldMap(chart.spec));
+        }
     });
 });

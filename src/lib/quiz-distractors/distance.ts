@@ -33,6 +33,8 @@ import { ChartLevelSpec, FieldMeta } from './extract';
 export const EDIT_COSTS = {
     SORT_FLIP: 0.5,
     CONFIG_TWEAK: 0.3,       // interpolate style, corner radius, ...
+    COLOR_SHIFT: 0.4,        // palette / mark-color swap, marks unchanged
+    SCALE_CHANGE: 0.6,       // linear ↔ log on the measure axis
     MARK_NEAR: 1.0,          // same family: bar ↔ lollipop, line ↔ area
     MARK_MID: 1.8,           // adjacent family: bar ↔ line, line ↔ scatter
     MARK_FAR: 2.6,           // remote family: bar ↔ pie, line ↔ heatmap
@@ -173,9 +175,13 @@ export function specDiff(
         }
     }
 
-    // config tweaks (interpolate etc.)
-    const oCfg = JSON.stringify(original.config ?? {});
-    const vCfg = JSON.stringify(variant.config ?? {});
+    // config tweaks (interpolate etc.) — quiz-internal `_quiz*` keys are
+    // excluded: those edits (color shift, scale change) carry their own
+    // declared cost, and counting the config delta again would double-bill.
+    const dropQuizKeys = (cfg: Record<string, any> | undefined) =>
+        Object.fromEntries(Object.entries(cfg ?? {}).filter(([k]) => !k.startsWith('_quiz')));
+    const oCfg = JSON.stringify(dropQuizKeys(original.config));
+    const vCfg = JSON.stringify(dropQuizKeys(variant.config));
     if (oCfg !== vCfg) {
         edits.push({ op: 'CONFIG', detail: 'chart property tweak', cost: EDIT_COSTS.CONFIG_TWEAK });
     }

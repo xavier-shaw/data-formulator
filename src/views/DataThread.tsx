@@ -32,11 +32,15 @@ import {
 import '../scss/VisualizationView.scss';
 import { useTranslation } from 'react-i18next';
 import { batch, useDispatch, useSelector } from 'react-redux';
-import { DataFormulatorState, dfActions, dfSelectors, SSEMessage, GeneratedReport, FINDINGS_REPORT_ID, reportContainsChart } from '../app/dfSlice';
+import { DataFormulatorState, dfActions, dfSelectors, SSEMessage, GeneratedReport, FINDINGS_REPORT_ID } from '../app/dfSlice';
+
+// Stable fallback so the findings selector never fabricates a fresh [] per call
+// (pre-feature persisted states can lack the field).
+const EMPTY_FINDINGS_IDS: string[] = [];
 import { getTriggers, getUrls, fetchWithIdentity } from '../app/utils';
 import { apiRequest } from '../app/apiClient';
 import { extractErrorMessage } from '../app/errorHandler';
-import { Chart, DictTable, Trigger, InteractionEntry, computeInsightKey } from "../components/ComponentType";
+import { Chart, DictTable, Trigger, InteractionEntry } from "../components/ComponentType";
 import { CATALOG_TABLE_ITEM } from '../components/DndTypes';
 import type { CatalogTableDragItem } from '../components/DndTypes';
 import { loadTable } from '../app/tableThunks';
@@ -2915,12 +2919,12 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     const hideAgentSummaries = useSelector((state: DataFormulatorState) =>
         (state.config.studyCondition ?? 'default') !== 'default');
 
-    // Study conditions: participants curate charts into their own findings
-    // report via a per-chart "add to report" button on the thread cards.
+    // Study conditions: participants curate charts into the "My findings"
+    // panel via a per-chart add/remove toggle on the thread cards.
     const isStudyCondition = useSelector((state: DataFormulatorState) =>
         (state.config.studyCondition ?? 'default') !== 'default');
-    const findingsReport = useSelector((state: DataFormulatorState) =>
-        state.generatedReports.find(r => r.id === FINDINGS_REPORT_ID));
+    const findingsChartIds = useSelector((state: DataFormulatorState) =>
+        state.findingsChartIds) ?? EMPTY_FINDINGS_IDS;
 
     // Derive focusedTableId from focusedId for scroll/highlight logic.
     // (Reports no longer take canvas focus — they open in the side panel.)
@@ -3143,10 +3147,10 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                     dispatch(dfActions.setFocused({ type: 'chart', chartId: chart.id }));
                 }}
             />;
-            // Study conditions: per-chart "add to report" (not on Table/Auto/'?'
-            // charts — they have no renderable image for the report embed).
+            // Study conditions: per-chart "add to findings" (not on Table/Auto/'?'
+            // charts — they have no renderable image for the findings preview).
             const reportEligible = isStudyCondition && !['Table', 'Auto', '?'].includes(chart.chartType);
-            const addedToReport = reportEligible && reportContainsChart(findingsReport, chart.id);
+            const addedToReport = reportEligible && findingsChartIds.includes(chart.id);
             return {
                 chartId: chart.id,
                 tableId: table.id,
@@ -3156,30 +3160,21 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                 unread: !!chart.unread,
                 ...(reportEligible ? {
                     addedToReport,
-                    addToReportTooltip: addedToReport ? t('report.alreadyInFindings') : t('report.addToFindings'),
+                    addToReportTooltip: addedToReport ? t('findings.removeChart') : t('report.addToFindings'),
                     onAddToReport: () => {
-                        // ensure → add → focus run synchronously in dispatch order,
-                        // so creation is race-free and the add is idempotent.
-                        dispatch(dfActions.ensureFindingsReport({ title: t('report.myFindingsTitle') }));
-                        const heading = chart.title?.trim()
-                            || t('report.chartNumberFallback', { number: (findingsReport?.selectedChartIds.length ?? 0) + 1 });
-                        // Agent caption (describe_chart) seeds the takeaway when
-                        // still fresh (same staleness rule as the title).
-                        const captionFresh = !!chart.description?.trim()
-                            && (!chart.descriptionKey || chart.descriptionKey === computeInsightKey(chart));
-                        dispatch(dfActions.addChartToReport({
-                            reportId: FINDINGS_REPORT_ID,
-                            chartId: chart.id,
-                            heading,
-                            placeholder: t('report.takeawayPlaceholder'),
-                            ...(captionFresh ? { takeaway: chart.description!.trim() } : {}),
-                        }));
+                        // Toggle membership in the findings collection; on add,
+                        // the panel opens so the chart lands visibly.
+                        if (addedToReport) {
+                            dispatch(dfActions.removeChartFromFindings({ chartId: chart.id }));
+                            return;
+                        }
+                        dispatch(dfActions.addChartToFindings({ chartId: chart.id }));
                         dispatch(dfActions.setFocused({ type: 'report', reportId: FINDINGS_REPORT_ID }));
                     },
                 } : {}),
             };
         });
-    }, [charts, tables, conceptShelfItems, chartSynthesisInProgress, isStudyCondition, findingsReport]);
+    }, [charts, tables, conceptShelfItems, chartSynthesisInProgress, isStudyCondition, findingsChartIds]);
 
     // anchors are considered leaf tables to simplify the view
 

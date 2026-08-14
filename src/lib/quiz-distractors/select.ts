@@ -7,9 +7,9 @@
  * This is the one place the quiz's *judgement calls* live, so the in-app quiz
  * and the offline pipeline cannot drift apart on them:
  *
- *  • which methods may supply a lure at all (see QUIZ_METHODS)
- *  • which charts are fair to ask about (see the family rule below)
- *  • how many lures an item needs, and how hard they should be
+ *  • an item's composition: exactly one lure per axis (see QUIZ_METHODS)
+ *  • which charts are fair to ask about (all three axes must fill)
+ *  • how hard the lures should be (nearest-first within each axis)
  *
  * Rendering is INJECTED (`RenderSvg`) because the two callers rasterize
  * differently — the app runs vega in the browser, the offline pipeline shells
@@ -17,7 +17,10 @@
  */
 
 import { SessionChart, SessionData, ChartLevelSpec, FieldMeta, compileToVegaLite } from './extract';
-import { generateAll, chartRoles, DistractorCandidate, Method } from './generators';
+import {
+    generateAll, generateCandidates, enforcePurity, pairKey,
+    chartRoles, DistractorCandidate, Method,
+} from './generators';
 import { SpecEdit, specDiff, specDistance, dataDistance, mergeEdits, DataDistance } from './distance';
 import { renderHash, degenerateText, stripSvgText } from './guard';
 import { withSeededRandom } from './seeded';
@@ -26,39 +29,22 @@ import { withSeededRandom } from './seeded';
 export type RenderSvg = (vlSpec: any, id: string) => Promise<string | null>;
 
 /**
- * The only methods the quiz draws lures from.
+ * Every quiz item carries exactly one lure per axis, in this order:
  *
- * These two are what the two-step question is built to separate:
+ *   form      the drawing changed, the data did not — a wrong pick here means
+ *             the participant did not encode HOW their chart looked.
+ *   content   the data changed, the drawing did not — a wrong pick here means
+ *             they did not encode WHAT the data said.
+ *   combined  one form edit composed with one content edit.
  *
- *   graphscape    changes the FORM and leaves the values alone, so it is caught
- *                 (or missed) in step 1, where the text is hidden.
- *   data-perturb  keeps the form exactly and changes the VALUES, so it shows up
- *                 as a different shape in step 1 and different numbers in step 2.
- *
- * The other methods (enumeration, sibling-measure, session-hybrid) change form
- * and content together, which muddies that split. They are still generated and
- * remain visible in author mode — the quiz simply does not ask about them.
+ * Because the content lure always keeps the original's chart type, the correct
+ * answer is never the only chart of its kind on screen — the old chart-family
+ * fairness guard is satisfied by construction.
  */
-export const QUIZ_METHODS: ReadonlySet<Method> = new Set<Method>(['graphscape', 'data-perturb']);
-
-/** @deprecated kept for readers of older manifests; prefer QUIZ_METHODS. */
-export const QUIZ_EXCLUDE_METHODS: ReadonlySet<Method> = new Set<Method>(
-    (['enumeration', 'sibling-measure', 'session-hybrid'] as Method[]),
-);
+export const QUIZ_METHODS: readonly Method[] = ['form', 'content', 'combined'];
 
 /** How many distractors one item shows besides the correct answer. */
-export const LURES_PER_ITEM = 3;
-
-/** Chart families — a lure in the same family is what makes an item non-obvious. */
-const FAMILY: Record<string, string> = {
-    'Bar Chart': 'bar', 'Bar Table': 'bar', 'Grouped Bar Chart': 'bar', 'Stacked Bar Chart': 'bar',
-    'Lollipop Chart': 'bar', 'Pyramid Chart': 'bar', 'Histogram': 'bar', 'Waterfall Chart': 'bar',
-    'Line Chart': 'line', 'Area Chart': 'line', 'Bump Chart': 'line', 'Streamgraph': 'line',
-    'Scatter Plot': 'point', 'Strip Plot': 'point', 'Ranged Dot Plot': 'point', 'Regression': 'point',
-    'Pie Chart': 'radial', 'Rose Chart': 'radial', 'Radar Chart': 'radial',
-    'Heatmap': 'grid', 'US Map': 'geo', 'World Map': 'geo',
-};
-export const chartFamily = (chartType: string): string => FAMILY[chartType] ?? 'other';
+export const LURES_PER_ITEM = QUIZ_METHODS.length;
 
 // ── scoring ──────────────────────────────────────────────────────────────
 
@@ -67,31 +53,6 @@ export interface ScoredCandidate extends DistractorCandidate {
     specDist: number;
     dataDist: number;
     dataDetail: DataDistance;
-}
-
-/**
- * Reorder candidates so the methods take turns, keeping each method's own
- * nearest-first order.
- *
- * Ranking purely by distance would hand almost every question to
- * `data-perturb`: a nudged value scores ~0.1 combined while the cheapest form
- * edit (a re-sort) scores 0.5, so the form lures lose every comparison. A
- * question whose three lures are all value nudges only ever probes one kind of
- * memory. Taking turns keeps both kinds on screen while still preferring the
- * hardest lure available from each.
- */
-export function interleaveByMethod<T extends { method: Method }>(sorted: T[]): T[] {
-    const queues = new Map<Method, T[]>();
-    for (const c of sorted) {
-        if (!queues.has(c.method)) queues.set(c.method, []);
-        queues.get(c.method)!.push(c);
-    }
-    const out: T[] = [];
-    const lists = [...queues.values()];
-    for (let i = 0; out.length < sorted.length; i++) {
-        for (const list of lists) if (i < list.length) out.push(list[i]);
-    }
-    return out;
 }
 
 /** Score every candidate of one chart on the two distance axes. */
@@ -112,10 +73,14 @@ export interface QuizOption {
     svg: string;
     /** absent on the correct answer */
     method?: Method;
+    /** the specific operation behind a lure, e.g. 'mark', 'sort-value' */
+    op?: string;
     label?: string;
     specDist?: number;
     dataDist?: number;
     chartType: string;
+    /** on the combined lure: the ids of the form and content options it composes */
+    composedOf?: [string, string];
 }
 
 export interface QuizItem {
@@ -143,10 +108,8 @@ export interface BuildQuizOptions {
     /** how many questions to keep (charts are ranked by focus time) */
     topN?: number;
     seed?: number;
-    /** first render batch size, then escalates until enough lures survive */
-    batchSize?: number;
-    /** hard cap on lures rendered per chart */
-    maxRenders?: number;
+    /** hard cap on renders spent searching one chart for its (A, B, A+B) triple */
+    maxRendersPerChart?: number;
     onProgress?: (done: number, total: number, label: string) => void;
     /** called between charts so a UI can paint */
     yieldToUi?: () => Promise<void>;
@@ -154,39 +117,53 @@ export interface BuildQuizOptions {
 
 export const DEFAULT_SEED = 20260807;
 
+/** A rendered candidate that already passed the per-option guard. */
+interface Rendered { svg: string; hash: string; blind: string }
+
 /**
  * Build quiz items for the charts the participant focused on longest.
  *
  * Candidate generation happens for ALL charts up front, inside one seeded
  * synchronous block — both because the seeded `Math.random` patch is only safe
  * synchronously, and so the draw sequence does not depend on how rendering is
- * scheduled.
+ * scheduled. The composition grid is materialized there too, since composing
+ * later (after an await) would draw from an unseeded `Math.random`.
  *
- * Rendering then proceeds nearest-first in escalating batches: the closest lures
- * are the hardest and therefore the ones worth asking about, but some of them
- * get dropped by the guard, so a chart is only declared unusable after the
- * budget is spent — never merely because the first batch came up short.
+ * An item is a 2×2: the original, a form lure A, a content lure B, and A+B —
+ * the same two edits composed. Assembly therefore SEARCHES for a triple rather
+ * than filling each axis independently: A and B are walked in preference order,
+ * and a pair is only accepted when all four options render, survive the guard,
+ * and are pairwise distinct (with text and without it). Renders are cached per
+ * candidate, so backtracking to a different B never re-renders A.
  */
 export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizResult> {
     const {
         session, render, topN = 12, seed = DEFAULT_SEED,
-        batchSize = 6, maxRenders = 18, onProgress, yieldToUi,
+        // Bounds the A × B search. A chart usually settles on its first or
+        // second pair; the cap only bites on charts where many edits are inert
+        // (a Bar Table renders every sort variant identically).
+        maxRendersPerChart = 30, onProgress, yieldToUi,
     } = opts;
 
-    // Phase 1 — all candidate specs, one seeded stream, fully synchronous.
+    // Phase 1 — all candidate specs and the composition grid, one seeded
+    // stream, fully synchronous.
     const generated = withSeededRandom(seed, () =>
-        session.charts.map(chart => ({ chart, candidates: generateAll(chart, session) })));
+        session.charts.map(chart => ({ chart, candidates: generateCandidates(chart, session) })));
 
     // Phase 2 — score (cheap, no rendering) and order charts by focus time.
-    const scoredPerChart = generated.map(({ chart, candidates }) => ({
-        chart,
-        scored: interleaveByMethod(
-            scoreCandidates(chart, candidates)
-                .filter(c => !c.caveat && QUIZ_METHODS.has(c.method))
+    const scoredPerChart = generated.map(({ chart, candidates }) => {
+        const usable = (cs: DistractorCandidate[]) =>
+            scoreCandidates(chart, enforcePurity(chart, cs))
+                .filter(c => !c.caveat)
                 // hardest first: the nearest lure on both axes
-                .sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist)),
-        ),
-    }));
+                .sort((a, b) => (a.specDist + a.dataDist) - (b.specDist + b.dataDist));
+        return {
+            chart,
+            form: usable(candidates.form),
+            content: usable(candidates.content),
+            pairs: candidates.pairs,
+        };
+    });
     scoredPerChart.sort((a, b) => (b.chart.focusMs ?? 0) - (a.chart.focusMs ?? 0));
 
     const ranked = scoredPerChart.map(({ chart }) => ({
@@ -197,7 +174,25 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
     const skipped: SkippedChart[] = [];
     const total = Math.min(topN, scoredPerChart.length);
 
-    for (const { chart, scored } of scoredPerChart) {
+    /** per axis: how often each op has already supplied a lure (for rotation) */
+    const opUse = new Map<Method, Map<string, number>>(QUIZ_METHODS.map(m => [m, new Map()]));
+
+    /**
+     * Rotate operations across items: strictly nearest-first would hand the
+     * same cheapest op to every question (the color shift is always the closest
+     * form lure, the category filter the closest content lure), and twelve
+     * questions probing the same two memories measure less than twelve probing
+     * different ones. Least-used op first, nearest-first within it.
+     */
+    const rotate = (cands: ScoredCandidate[], method: Method): ScoredCandidate[] => {
+        const use = opUse.get(method)!;
+        return cands
+            .map((c, i) => ({ c, i }))
+            .sort((a, b) => (use.get(a.c.op) ?? 0) - (use.get(b.c.op) ?? 0) || a.i - b.i)
+            .map(x => x.c);
+    };
+
+    for (const { chart, form, content, pairs } of scoredPerChart) {
         if (items.length >= topN) break;
         onProgress?.(items.length, total, chart.title);
 
@@ -210,64 +205,91 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
             origSvg = await render(compileToVegaLite(chart.spec, chart.rows, chart.metadata), `${chart.id}_orig`);
         } catch { origSvg = null; }
         if (!origSvg) { skip('the original chart did not render'); continue; }
-        const origHash = renderHash(origSvg);
+        const orig: Rendered = {
+            svg: origSvg,
+            hash: renderHash(origSvg),
+            // Step 1 hides all text, so a lure must also differ from the
+            // original once the labels are gone. Otherwise a text-only change —
+            // the label-substitution perturbation relabels a single category and
+            // leaves every mark where it was — would put two identical pictures
+            // on screen and make step 1 unanswerable.
+            blind: renderHash(stripSvgText(origSvg)),
+        };
 
-        // Render nearest-first in batches; stop as soon as enough distinct
-        // lures survive the guard.
-        const kept: QuizOption[] = [];
-        const keptHashes = new Set<string>();
-        // Step 1 hides all text, so a lure must also differ from the original
-        // once the labels are gone. Otherwise a text-only change — the
-        // label-substitution perturbation relabels a single category and leaves
-        // every mark where it was — would put two identical pictures on screen
-        // and make step 1 unanswerable.
-        const blindHashes = new Set<string>([renderHash(stripSvgText(origSvg))]);
-        let cursor = 0;
-        while (kept.length < LURES_PER_ITEM && cursor < scored.length && cursor < maxRenders) {
-            const batch = scored.slice(cursor, cursor + batchSize);
-            cursor += batch.length;
-            for (const cand of batch) {
-                if (kept.length >= LURES_PER_ITEM) break;
-                let svg: string | null = null;
-                try {
-                    svg = await render(compileToVegaLite(cand.spec, cand.rows, cand.metadata), `${chart.id}_${kept.length}`);
-                } catch { svg = null; }
-                if (!svg) continue;
-                if (degenerateText(svg).length) continue;      // visibly broken
-                const h = renderHash(svg);
-                if (h === origHash) continue;                  // would be a 2nd correct answer
-                if (keptHashes.has(h)) continue;               // duplicate option
-                const blind = renderHash(stripSvgText(svg));
-                if (blindHashes.has(blind)) continue;          // indistinguishable in step 1
-                keptHashes.add(h);
-                blindHashes.add(blind);
-                kept.push({
-                    id: `${chart.id}_d${kept.length}`,
-                    svg,
-                    method: cand.method,
-                    label: cand.label,
-                    specDist: cand.specDist,
-                    dataDist: cand.dataDist,
-                    chartType: cand.spec.chartType,
-                });
+        // Render once per candidate, cached: the A × B search revisits the same
+        // A for many Bs, and a rejected candidate must stay rejected.
+        const cache = new Map<string, Rendered | null>();
+        let budget = maxRendersPerChart;
+        const rendered = async (cand: ScoredCandidate | DistractorCandidate, key: string): Promise<Rendered | null> => {
+            if (cache.has(key)) return cache.get(key)!;
+            if (budget <= 0) return null;
+            budget--;
+            let svg: string | null = null;
+            try {
+                svg = await render(compileToVegaLite(cand.spec, cand.rows, cand.metadata), `${chart.id}_${key}`);
+            } catch { svg = null; }
+            const ok = svg && !degenerateText(svg).length ? svg : null;
+            let result: Rendered | null = null;
+            if (ok) {
+                const hash = renderHash(ok);
+                const blind = renderHash(stripSvgText(ok));
+                // A lure that renders like the original is a second correct
+                // answer; one that matches it blind is unanswerable in step 1.
+                if (hash !== orig.hash && blind !== orig.blind) result = { svg: ok, hash, blind };
+            }
+            cache.set(key, result);
+            return result;
+        };
+
+        // Search for the triple. A and B are independent probes, so preference
+        // order runs over A outermost — the form lure is the one a chart is
+        // most likely to run out of.
+        let chosen: { a: ScoredCandidate; b: ScoredCandidate; ab: DistractorCandidate;
+                      ra: Rendered; rb: Rendered; rab: Rendered } | null = null;
+        let sawA = false, sawB = false;
+
+        outer:
+        for (const a of rotate(form, 'form')) {
+            const ra = await rendered(a, `form${a.formIndex}`);
+            if (!ra) continue;
+            sawA = true;
+            for (const b of rotate(content, 'content')) {
+                const rb = await rendered(b, `content${b.contentIndex}`);
+                if (!rb) continue;
+                sawB = true;
+                if (rb.hash === ra.hash || rb.blind === ra.blind) continue;
+                const ab = pairs.get(pairKey(a.formIndex!, b.contentIndex!));
+                if (!ab) continue;
+                const rab = await rendered(ab, `both${a.formIndex}_${b.contentIndex}`);
+                if (!rab) continue;
+                // A+B must be its own picture: if composing B onto A changed
+                // nothing visible, the item would show a duplicate option.
+                if (rab.hash === ra.hash || rab.hash === rb.hash) continue;
+                if (rab.blind === ra.blind || rab.blind === rb.blind) continue;
+                chosen = { a, b, ab, ra, rb, rab };
+                break outer;
             }
         }
 
-        if (kept.length < LURES_PER_ITEM) {
-            skip(`only ${kept.length} usable look-alike(s); an item needs ${LURES_PER_ITEM}`);
+        if (!chosen) {
+            skip(!sawA ? 'no usable form look-alike; an item needs one'
+                : !sawB ? 'no usable content look-alike; an item needs one'
+                : 'no form and content pair composes into a distinct third chart');
             if (yieldToUi) await yieldToUi();
             continue;
         }
 
-        // Fairness: if no surviving lure shares the chart's family, the correct
-        // answer is the only chart of its kind on screen and the participant can
-        // pick it without remembering anything (a map among bar charts).
-        const ownFamily = chartFamily(chart.spec.chartType);
-        if (!kept.some(k => chartFamily(k.chartType) === ownFamily)) {
-            skip(`no look-alike shares its chart family (${ownFamily}), so the answer would be obvious`);
-            if (yieldToUi) await yieldToUi();
-            continue;
-        }
+        const { a, b, ab, ra, rb, rab } = chosen;
+        opUse.get('form')!.set(a.op, (opUse.get('form')!.get(a.op) ?? 0) + 1);
+        opUse.get('content')!.set(b.op, (opUse.get('content')!.get(b.op) ?? 0) + 1);
+
+        const scoredAb = scoreCandidates(chart, [ab])[0];
+        const formId = `${chart.id}_dForm`;
+        const contentId = `${chart.id}_dContent`;
+        const option = (id: string, r: Rendered, c: { method: Method; op: string; label: string; specDist: number; dataDist: number; spec: ChartLevelSpec }): QuizOption => ({
+            id, svg: r.svg, method: c.method, op: c.op, label: c.label,
+            specDist: c.specDist, dataDist: c.dataDist, chartType: c.spec.chartType,
+        });
 
         items.push({
             chartId: chart.id,
@@ -275,7 +297,12 @@ export async function buildQuizItems(opts: BuildQuizOptions): Promise<BuildQuizR
             chartType: chart.spec.chartType,
             focusMs: chart.focusMs ?? 0,
             correctId: `${chart.id}_orig`,
-            options: [{ id: `${chart.id}_orig`, svg: origSvg, chartType: chart.spec.chartType }, ...kept],
+            options: [
+                { id: `${chart.id}_orig`, svg: orig.svg, chartType: chart.spec.chartType },
+                option(formId, ra, a),
+                option(contentId, rb, b),
+                { ...option(`${chart.id}_dBoth`, rab, scoredAb), composedOf: [formId, contentId] },
+            ],
         });
 
         if (yieldToUi) await yieldToUi();
@@ -295,6 +322,8 @@ export interface AuthoredLure {
     id: string;
     svg: string;
     method: Method;
+    /** the specific operation, e.g. 'mark', 'sort-value', 'perturb-invert' */
+    op: string;
     label: string;
     rationale: string;
     chartType: string;
@@ -344,9 +373,9 @@ function spreadAcrossRange<T extends { specDist: number; dataDist: number }>(can
  * for a whole session is hundreds of charts, so a panel should ask for one
  * chart at a time rather than freezing while it renders them all.
  *
- * Unlike the quiz this keeps methods the quiz bars and charts the quiz skips:
- * the point is to inspect what the generators do, so a lure the quiz would
- * refuse is still worth seeing — flagged with `quizEligible: false`.
+ * Unlike the quiz this keeps charts the quiz skips: the point is to inspect
+ * what the generators do, so a chart that cannot fill all three axes is still
+ * worth opening here.
  */
 export async function buildAuthorViewForChart(
     chart: SessionChart,
@@ -393,6 +422,7 @@ export async function buildAuthorViewForChart(
                 id: `${chart.id}_a${n}`,
                 svg,
                 method: cand.method,
+                op: cand.op,
                 label: cand.label,
                 rationale: cand.rationale,
                 chartType: cand.spec.chartType,
@@ -402,7 +432,7 @@ export async function buildAuthorViewForChart(
                 dataDetail: cand.dataDetail,
                 dataEditNote: cand.dataEditNote,
                 caveat: cand.caveat,
-                quizEligible: QUIZ_METHODS.has(cand.method) && !cand.caveat,
+                quizEligible: !cand.caveat,
             });
         }
         if (lures.length) byMethod.push({ method, lures });
@@ -437,6 +467,25 @@ export function verifyQuizItems(items: QuizItem[]): string[] {
         }
         if (!item.options.some(o => o.id === item.correctId)) {
             problems.push(`"${item.title}": the correct answer is not among the options`);
+        }
+        for (const method of QUIZ_METHODS) {
+            if (item.options.filter(o => o.method === method).length !== 1) {
+                problems.push(`"${item.title}": expected exactly one ${method} lure`);
+            }
+        }
+        // The combined lure must be the composition of THIS item's own form and
+        // content lures — an independently drawn pair would break the 2×2 the
+        // analysis reads (A alone, B alone, A and B together).
+        const a = item.options.find(o => o.method === 'form');
+        const b = item.options.find(o => o.method === 'content');
+        const ab = item.options.find(o => o.method === 'combined');
+        if (a && b && ab) {
+            if (ab.composedOf?.[0] !== a.id || ab.composedOf?.[1] !== b.id) {
+                problems.push(`"${item.title}": the combined lure does not name this item's form and content lures`);
+            }
+            if (ab.op !== `${a.op}+${b.op}`) {
+                problems.push(`"${item.title}": combined op "${ab.op}" is not "${a.op}+${b.op}"`);
+            }
         }
     }
     return problems;

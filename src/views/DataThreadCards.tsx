@@ -49,7 +49,10 @@ export let buildChartCard = (
             display: 'flex',
             alignItems: 'flex-start',
             width: 'fit-content',
-            '& .data-thread-chart-delete-btn-external': { opacity: 0, transition: 'opacity 0.15s' },
+            // Hover-reveal for the side action buttons — except the add-to-findings
+            // button once its chart is added: the check stays visible so the user
+            // can always see which charts they have selected.
+            '& .data-thread-chart-delete-btn-external:not(.added-to-report)': { opacity: 0, transition: 'opacity 0.15s' },
             '&:hover .data-thread-chart-delete-btn-external': { opacity: 1 },
             '@keyframes unreadPulse': {
                 '0%, 100%': { transform: 'scale(1)', opacity: 0.75 },
@@ -90,7 +93,7 @@ export let buildChartCard = (
                 {chartElement.onAddToReport && (
                     <Tooltip title={chartElement.addToReportTooltip ?? ''}>
                         <IconButton
-                            className="data-thread-chart-delete-btn-external"
+                            className={`data-thread-chart-delete-btn-external${chartElement.addedToReport ? ' added-to-report' : ''}`}
                             size="small"
                             color={chartElement.addedToReport ? 'success' : 'primary'}
                             aria-label={chartElement.addToReportTooltip ?? 'add chart to report'}

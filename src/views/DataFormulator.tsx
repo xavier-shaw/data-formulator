@@ -47,6 +47,7 @@ import exampleImageTable from "../assets/example-image-table.png";
 import { ModelSelectionButton } from './ModelSelectionDialog';
 import { UnifiedDataUploadDialog, UploadTabType, DataLoadMenu, ConnectorInstance } from './UnifiedDataUploadDialog';
 import { ReportView } from './ReportView';
+import { FindingsPanel } from './FindingsPanel';
 import { DataSourceSidebar } from './DataSourceSidebar';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import { ExampleSession, exampleSessions, ExampleSessionCard, fetchExampleSessions } from './ExampleSessions';
@@ -89,6 +90,7 @@ export const DataFormulatorFC = ({ }) => {
     const models = useSelector(dfSelectors.getAllModels);
     const selectedModelId = useSelector((state: DataFormulatorState) => state.selectedModelId);
     const viewMode = useSelector((state: DataFormulatorState) => state.viewMode);
+    const studyCondition = useSelector((state: DataFormulatorState) => state.config.studyCondition ?? 'default');
     const serverConfig = useSelector((state: DataFormulatorState) => state.serverConfig);
     const identityKey = useSelector((state: DataFormulatorState) => `${state.identity.type}:${state.identity.id}`);
     const dataLoadingChatMessages = useSelector((state: DataFormulatorState) => state.dataLoadingChatMessages);
@@ -591,7 +593,14 @@ export const DataFormulatorFC = ({ }) => {
                 if (w <= 0) return;
                 if (viewMode === 'report') {
                     const threadW = threadPaneWidth(1);
-                    const reportW = Math.max(360, Math.min(700, Math.round(w * 0.42)));
+                    // Keep in sync with the third pane's minSize/preferredSize
+                    // below — this imperative resize runs after mount and WINS
+                    // over preferredSize, so changing only the pane props has no
+                    // effect on the open path. The findings panel is a chart list
+                    // (half width); the report is a document.
+                    const reportW = studyCondition !== 'default'
+                        ? Math.max(200, Math.min(350, Math.round(w * 0.21)))
+                        : Math.max(360, Math.min(700, Math.round(w * 0.42)));
                     allotmentRef.current?.resize([threadW, Math.max(300, w - threadW - reportW), reportW]);
                 } else {
                     const threadW = threadPaneWidth(2);
@@ -602,7 +611,7 @@ export const DataFormulatorFC = ({ }) => {
             }
         });
         return () => cancelAnimationFrame(rafId);
-    }, [viewMode, tables.length]);
+    }, [viewMode, tables.length, studyCondition]);
 
     const fixedSplitPane = (
         <Box sx={{display: 'flex', flexDirection: 'row', height: '100%'}}>
@@ -636,13 +645,13 @@ export const DataFormulatorFC = ({ }) => {
                             {visPane}
                         </Box>
                     </Allotment.Pane>
-                    {/* Report panel — a third column that coexists with the
-                        thread pane and the chart canvas instead of replacing
-                        the canvas. Mounted only while a report is open. */}
                     {viewMode === 'report' ? (
-                        <Allotment.Pane minSize={360} preferredSize="42%" snap={false}>
+                        <Allotment.Pane
+                            minSize={studyCondition !== 'default' ? 200 : 360}
+                            preferredSize={studyCondition !== 'default' ? '21%' : '42%'}
+                            snap={false}>
                             <Box sx={{ ...borderBoxStyle, ml: '6px', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', backgroundColor: 'white' }}>
-                                <ReportView />
+                                {studyCondition !== 'default' ? <FindingsPanel /> : <ReportView />}
                             </Box>
                         </Allotment.Pane>
                     ) : null}

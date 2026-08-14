@@ -24,6 +24,11 @@ export const borderColor = {
     /** 0.12 — outer containers: panels, dialogs, popovers, drop zones
      *  DataThread popups, UnifiedDataUploadDialog, AgentRulesDialog */
     view: 'rgba(0, 0, 0, 0.12)',
+
+    /** 0.87 — buttons that must read as separate objects in a dense row:
+     *  the attribute chips of the memory quiz's recall steps, where a hairline
+     *  edge left it unclear where one attribute ended and the next began */
+    strong: 'rgba(0, 0, 0, 0.87)',
 } as const;
 
 // ── Composite border styles (spread into sx) ───────────────────────────

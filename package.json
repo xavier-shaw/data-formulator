@@ -28,6 +28,7 @@
         "@tiptap/starter-kit": "^3.22.2",
         "@types/dompurify": "^3.0.5",
         "@types/validator": "^13.12.2",
+        "@xyflow/react": "^12.11.3",
         "allotment": "^1.20.4",
         "canvas": "^3.2.1",
         "chart.js": "^4.5.1",

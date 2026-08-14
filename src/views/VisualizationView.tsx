@@ -741,12 +741,6 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
     // + field ids), so it stays through property edits (e.g. sort order) but is
     // dropped once the encoded fields change.
     const titleFresh = !!focusedChart.title && focusedChart.titleKey === computeInsightKey(focusedChart);
-    // Agent caption from the study modes' describe_chart action (executor:
-    // computed data facts; analyst: perceived pattern). Same staleness rule as
-    // the title: hidden once the user edits the chart's encodings.
-    const captionFresh = !!focusedChart.description?.trim()
-        && (!focusedChart.descriptionKey || focusedChart.descriptionKey === computeInsightKey(focusedChart));
-    
     const actionBtnSx = {
         padding: '4px',
         borderRadius: '6px',
@@ -795,9 +789,11 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
         chartMessage = t('chart.msgUnavailable');
     } else if (chartSynthesisInProgress.includes(focusedChart.id)) {
         chartMessage = t('chart.msgSynthesizing');
-    } else if (table.derive) {
-        chartMessage = t('chart.msgWarning');
     }
+    // (User study) The derived-table case used to append chart.msgWarning
+    // ("AI generated results can be inaccurate, inspect it!") here. Hidden:
+    // the line re-surfaces agent attribution under every chart, which the
+    // study keeps off the participant surface.
     let chartActionItems = isDataStale ? [] : (
         <Box sx={{display: "flex", flexDirection: "column", flex: 1, my: 1}}>
             {(table.virtual ? activeVisTableTotalRowCount > serverConfig.MAX_DISPLAY_ROWS : table.rows.length > serverConfig.MAX_DISPLAY_ROWS) && !(chartUnavailable || encodingShelfEmpty) ? (
@@ -867,20 +863,6 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                                         onSpecReady={handleSpecReady}
                                     />
                                 </Box>
-                                {/* Agent caption (describe_chart) — the chart's
-                                    takeaway seed, shown beneath the canvas. */}
-                                {captionFresh && (
-                                    <Typography sx={{
-                                        maxWidth: Math.max(config.defaultChartWidth * 1.4, 480),
-                                        mx: 'auto', mt: 1, px: 2,
-                                        textAlign: 'left',
-                                        fontSize: 13,
-                                        lineHeight: 1.5,
-                                        color: 'text.secondary',
-                                    }}>
-                                        {focusedChart.description!.trim()}
-                                    </Typography>
-                                )}
                                 {/* Quick chart-config controls (toggles/sliders/selects) for
                                     fast in-place tweaks without opening the full encoding
                                     popover. Kept INSIDE the chart-box so it reads as part of
@@ -1138,9 +1120,14 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
             {/* Right-aligned floating cluster near the top-right: "inspect /
                 edit this chart" controls grouped together (agent log + code +
                 encoding shelf). Chart deletion lives in the chart property-config
-                bar below the chart. */}
+                bar below the chart.
+                Study conditions keep only the encoding shelf + findings toggle:
+                the agent-log and code inspectors expose the agent's transcript
+                and generated code, which is agent attribution the study keeps
+                off the participant surface (same gate as the style module and
+                the quick-config bar). */}
             <Box sx={{ ml: 'auto', mr: '8px', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                {hasDerived && (
+                {hasDerived && (config.studyCondition ?? 'default') === 'default' && (
                     <Tooltip title={t('chart.log')} placement="bottom">
                         <IconButton
                             size="small"
@@ -1152,7 +1139,7 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                 )}
                 {/* Code inspector button — opens the derivation code + formula
                     metadata in a dialog. Only shown for derived tables. */}
-                {hasDerived && (
+                {hasDerived && (config.studyCondition ?? 'default') === 'default' && (
                     <Tooltip title={t('chart.code')} placement="bottom">
                         <IconButton
                             size="small"
@@ -1183,18 +1170,17 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                         </IconButton>
                     </Tooltip>
                 )}
-                {/* Findings-report toggle: study conditions only. Participants
-                    document their takeaways in a self-authored report; this
-                    opens/closes it in the side panel. */}
+                {/* "My findings" panel toggle: study conditions only. The panel
+                    is a plain chart collection (no report document backs it, so
+                    there is nothing to ensure before opening). */}
                 {(config.studyCondition ?? 'default') !== 'default' && (
-                    <Tooltip title={findingsReportOpen ? t('report.closePanel') : t('report.openFindings')} placement="bottom">
+                    <Tooltip title={findingsReportOpen ? t('findings.closePanel') : t('report.openFindings')} placement="bottom">
                         <IconButton
                             size="small"
                             onClick={() => {
                                 if (findingsReportOpen) {
                                     dispatch(dfActions.closeReportView());
                                 } else {
-                                    dispatch(dfActions.ensureFindingsReport({ title: t('report.myFindingsTitle') }));
                                     dispatch(dfActions.setFocused({ type: 'report', reportId: FINDINGS_REPORT_ID }));
                                 }
                             }}

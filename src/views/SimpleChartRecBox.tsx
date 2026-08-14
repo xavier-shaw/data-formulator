@@ -610,8 +610,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         let lastCreatedTableId: string | null = isResume ? clarificationContext!.lastCreatedTableId : null;
         // backend chart_id -> frontend chart id for charts created this run.
         // Normally identical (the forwarded id is adopted), but on an id
-        // conflict the frontend regenerates — this keeps describe_chart's
-        // caption (keyed by the backend id) attached to the right chart.
+        // conflict the frontend regenerates, so later events keyed by the
+        // backend id can still be resolved to the right chart.
         const backendChartIdMap = new Map<string, string>();
 
         // ── DraftNode tracking ──
@@ -1080,29 +1080,6 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                     currentDraftId = null;
                 }
                 createNextDraft(candidateTableId, []);
-            }
-
-            // ── chart_description: study modes' per-chart caption ──
-            // The describe_chart action follows the chart's result event, so
-            // the chart already exists in state. Stored like `title` with a
-            // freshness key (user edits to the encodings hide a stale caption);
-            // rendered under the focused chart and prefilled as the takeaway
-            // when the user adds the chart to their findings report.
-            if (result.type === "chart_description") {
-                const targetChartId = backendChartIdMap.get(result.chart_id) ?? result.chart_id;
-                const describedChart = [...createdCharts, ...charts].find(c => c.id === targetChartId);
-                const captionText = typeof result.description === 'string' ? result.description.trim() : '';
-                if (describedChart && captionText) {
-                    dispatch(dfActions.setChartDescription({
-                        chartId: describedChart.id,
-                        description: captionText,
-                        descriptionKey: computeInsightKey(describedChart),
-                    }));
-                    thinkingSteps.push('✓ ' + t('dataThread.captionedChart'));
-                    if (currentDraftId) {
-                        dispatch(dfActions.updateDraftRunningPlan({ draftId: currentDraftId, plan: thinkingSteps.join(STEP_SEP) }));
-                    }
-                }
             }
 
             // ── clarify / explain: pause and let user respond ──
