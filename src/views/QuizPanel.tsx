@@ -51,9 +51,10 @@ import {
 } from '../app/fieldRecall';
 import { FieldRecallStep } from './FieldRecallStep';
 import { ComboRecallStep } from './ComboRecallStep';
-import { loadTraceMaterial, TraceMaterial, TraceTreeAnswer, TraceWalkthroughAnswer } from '../app/reasoningTrace';
+import { loadTraceMaterial, TraceMaterial, TraceTreeAnswer } from '../app/reasoningTrace';
 import { TraceTreeStep } from './TraceTreeStep';
-import { TraceWalkthroughStep } from './TraceWalkthroughStep';
+import { ProvenanceStep } from './ProvenanceStep';
+import { ProvenanceAnswer, buildProvenanceMaterial } from '../app/provenanceQuiz';
 import { QuizItem, QuizOption, AuthoredChart, AuthoredLure, Method, stripSvgText, DEFAULT_SEED } from '../lib/quiz-distractors';
 
 interface QuizPanelProps {
@@ -153,10 +154,10 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     // Two prototype FORMS over the same material; the chooser lets a pilot
     // participant try either (or both — the second run is practice, and the
     // answer file records each form separately).
-    const [traceStage, setTraceStage] = useState<'choose' | 'tree' | 'thread'>('choose');
+    const [traceStage, setTraceStage] = useState<'choose' | 'tree' | 'provenance'>('choose');
     const [traceMaterial, setTraceMaterial] = useState<TraceMaterial | 'loading' | 'failed' | null>(null);
     const [traceTreeAnswer, setTraceTreeAnswer] = useState<TraceTreeAnswer | null>(null);
-    const [traceThreadAnswer, setTraceThreadAnswer] = useState<TraceWalkthroughAnswer | null>(null);
+    const [traceProvAnswer, setTraceProvAnswer] = useState<ProvenanceAnswer | null>(null);
 
     // ── author state: one entry per chart, filled in on expand ──
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -168,7 +169,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         setPhase('blind'); setBlindPick(null); setPicked(null);
         setFinished(false); setExpanded(new Set()); setAuthored({});
         setTraceStage('choose'); setTraceMaterial(null);
-        setTraceTreeAnswer(null); setTraceThreadAnswer(null);
+        setTraceTreeAnswer(null); setTraceProvAnswer(null);
         (async () => {
             try {
                 const generated = await generateQuizForSession({
@@ -289,7 +290,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     }, [comboGroups, recallMaterial]);
 
     /** Enter one of the trace forms, building the material the first time. */
-    const handleEnterTrace = useCallback((form: 'tree' | 'thread') => {
+    const handleEnterTrace = useCallback((form: 'tree' | 'provenance') => {
         setTraceStage(form);
         if (traceMaterial && traceMaterial !== 'failed') return;   // built or in flight
         setTraceMaterial('loading');
@@ -313,15 +314,15 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 total: 0, correct: 0, answers: [],
                 recall: recallAnswer ?? undefined, combos: comboAnswer ?? undefined,
             };
-        const result = (traceTreeAnswer || traceThreadAnswer)
-            ? { ...base, trace: { tree: traceTreeAnswer ?? undefined, thread: traceThreadAnswer ?? undefined } }
+        const result = (traceTreeAnswer || traceProvAnswer)
+            ? { ...base, trace: { tree: traceTreeAnswer ?? undefined, provenance: traceProvAnswer ?? undefined } }
             : base;
         const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = `quiz-${sessionName || sessionId}.json`; a.click();
         URL.revokeObjectURL(url);
-    }, [quiz, answers, recallAnswer, comboAnswer, traceTreeAnswer, traceThreadAnswer, sessionName, sessionId]);
+    }, [quiz, answers, recallAnswer, comboAnswer, traceTreeAnswer, traceProvAnswer, sessionName, sessionId]);
 
     /** Expand a chart in author mode, generating its look-alikes the first time. */
     const toggleAuthorChart = useCallback(async (chartId: string) => {
@@ -371,7 +372,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             <Tab value="recall" label={tick(!!recallAnswer, t('quiz.tabRecall', { defaultValue: '1 · Attributes' }))} />
             <Tab value="combos" label={tick(!!comboAnswer, t('quiz.tabCombos', { defaultValue: '2 · Combinations' }))} />
             <Tab value="charts" label={tick(finished, t('quiz.tabCharts', { defaultValue: '3 · Charts' }))} />
-            <Tab value="trace" label={tick(!!(traceTreeAnswer || traceThreadAnswer), t('quiz.tabTrace', { defaultValue: '4 · Path' }))} />
+            <Tab value="trace" label={tick(!!(traceTreeAnswer || traceProvAnswer), t('quiz.tabTrace', { defaultValue: '4 · Path' }))} />
             <Tab value="results" label={t('quiz.tabResults', { defaultValue: 'Results' })} />
             <Tab value="author" label={t('quiz.tabAuthor', { defaultValue: 'Author' })} />
         </Tabs>
@@ -542,8 +543,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         );
 
         if (traceStage === 'choose') {
-            const anyDone = !!(traceTreeAnswer || traceThreadAnswer);
-            const formCard = (form: 'tree' | 'thread', title: string, desc: string, done: boolean) => (
+            const anyDone = !!(traceTreeAnswer || traceProvAnswer);
+            const formCard = (form: 'tree' | 'provenance', title: string, desc: string, done: boolean) => (
                 <Box component="button" onClick={() => handleEnterTrace(form)}
                     sx={{ textAlign: 'left', p: 1.5, background: '#fff', cursor: 'pointer',
                           border: `2px solid ${done ? theme.palette.success.main : borderColor.view}`, borderRadius: radius.sm,
@@ -575,11 +576,11 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                 t('quiz.traceFormTreeDesc', { defaultValue:
                                     'Your charts, shuffled. Drag them onto a canvas and draw arrows to recreate how one chart led to the next.' }),
                                 !!traceTreeAnswer)}
-                            {formCard('thread',
-                                t('quiz.traceFormThread', { defaultValue: 'B — Walk through the thread' }),
-                                t('quiz.traceFormThreadDesc', { defaultValue:
-                                    'Your charts in the order you made them. Tell us, for each one, what you were after and what you found.' }),
-                                !!traceThreadAnswer)}
+                            {formCard('provenance',
+                                t('quiz.traceFormProv', { defaultValue: 'B — What came next?' }),
+                                t('quiz.traceFormProvDesc', { defaultValue:
+                                    'A chart you made, and three candidates for the one that followed it. Pick the right one, then say why you made that move.' }),
+                                !!traceProvAnswer)}
                         </Box>
                         <Button size="small" variant={anyDone ? 'contained' : 'text'} onClick={() => setTab('results')}
                             sx={{ fontSize: 12, textTransform: 'none' }}>
@@ -622,6 +623,19 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 </Box>
             );
         }
+        // Built here, not in the loader: form A needs the same material without it.
+        const provMaterial = traceStage === 'provenance' ? buildProvenanceMaterial(traceMaterial) : null;
+        if (provMaterial && provMaterial.items.length === 0) {
+            return (
+                <Box sx={{ p: 2 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 1 }}>
+                        {t('quiz.provNoItems', { defaultValue:
+                            'This session does not have enough charts to ask where one led to another.' })}
+                    </Typography>
+                    {traceBackButton}
+                </Box>
+            );
+        }
 
         return (
             <>
@@ -639,8 +653,8 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                             onDone={a => { setTraceTreeAnswer(a); setTraceStage('choose'); }} />
                     </Box>
                 ) : (
-                    <TraceWalkthroughStep material={traceMaterial} wide={wide}
-                        onDone={a => { setTraceThreadAnswer(a); setTraceStage('choose'); }} />
+                    <ProvenanceStep material={provMaterial!} wide={wide}
+                        onDone={a => { setTraceProvAnswer(a); setTraceStage('choose'); }} />
                 )}
             </>
         );
@@ -824,7 +838,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
 
     const resultsBody = () => {
         const total = quiz?.items.length ?? 0;
-        const nothingYet = answers.length === 0 && !recallAnswer && !comboAnswer && !traceTreeAnswer && !traceThreadAnswer;
+        const nothingYet = answers.length === 0 && !recallAnswer && !comboAnswer && !traceTreeAnswer && !traceProvAnswer;
         if (nothingYet) {
             return (
                 <Box sx={{ p: 2 }}>
@@ -881,7 +895,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                     {comboAnswer && comboSummary(comboAnswer)}
                     {/* part 4, when it was answered: the map score and/or the
                         walkthrough, now that revealing structure costs nothing */}
-                    {(traceTreeAnswer || traceThreadAnswer) && (
+                    {(traceTreeAnswer || traceProvAnswer) && (
                         <Box sx={{ mb: 1.5, p: 1.25, background: alpha(theme.palette.primary.main, 0.04), borderRadius: radius.sm }}>
                             <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>
                                 {t('quiz.traceResultTitle', { defaultValue: 'Your analysis path' })}
@@ -897,12 +911,13 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                                     })}
                                 </Typography>
                             )}
-                            {traceThreadAnswer && (
+                            {traceProvAnswer && (
                                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
-                                    {t('quiz.traceThreadResult', {
-                                        count: traceThreadAnswer.entries.length,
-                                        seconds: traceThreadAnswer.seconds,
-                                        defaultValue: `Walkthrough: ${traceThreadAnswer.entries.length} step(s) narrated in ${traceThreadAnswer.seconds}s — compared against your real prompts in the downloaded file.`,
+                                    {t('quiz.traceProvResult', {
+                                        correct: traceProvAnswer.score.correct,
+                                        total: traceProvAnswer.score.total,
+                                        seconds: traceProvAnswer.seconds,
+                                        defaultValue: `What came next: ${traceProvAnswer.score.correct} of ${traceProvAnswer.score.total} moves remembered in ${traceProvAnswer.seconds}s — your reasons are in the downloaded file, next to the prompts you really wrote.`,
                                     })}
                                 </Typography>
                             )}

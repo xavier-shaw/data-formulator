@@ -9,12 +9,12 @@
  * PROCESS: which chart led to which, and why each step was taken. Two prototype
  * forms share this material:
  *
- *   • tree   — rebuild the analysis as a tree on a canvas (structure memory,
- *              scored against the ground-truth lineage below)
- *   • thread — walk through the charts in the order they were made and narrate
- *              each step (rationale memory; the typed recollection is stored
- *              next to the prompt that actually produced the chart, for offline
- *              comparison — the prompt itself is never shown)
+ *   • tree       — rebuild the analysis as a tree on a canvas (structure memory,
+ *                  scored against the ground-truth lineage below)
+ *   • provenance — one move at a time: which chart came next, and why
+ *                  (app/provenanceQuiz.ts builds its items from this material;
+ *                  the prompt that really drove the move is stored next to the
+ *                  typed rationale for offline comparison, never shown)
  *
  * Ground truth: the same lineage the analysis graph uses. A chart's parent is
  * the previous chart on its own table (a refinement chain), else the latest
@@ -29,6 +29,7 @@ import { renderVegaLiteToSvg } from './vegaRender';
 import { promptOfTable, chartTime, PromptSource } from './analysisHybridGraph';
 import { chartDisplayTitle } from './chartTitle';
 import { resolveSessionState } from './quizGeneration';
+import { ProvenanceAnswer } from './provenanceQuiz';
 
 export interface TraceChart {
     chartId: string;
@@ -81,26 +82,7 @@ export interface TraceTreeAnswer {
     groundTruth: TraceEdge[];
 }
 
-export interface TraceWalkthroughEntry {
-    chartId: string;
-    num: number;
-    title: string;
-    /** "what were you trying to find out?" */
-    goal: string;
-    /** "what did you find, and where did it take you next?" */
-    finding: string;
-    /** ground truth, recorded for offline comparison; never shown in the step */
-    actualPrompt: string;
-    promptSource: PromptSource;
-}
-
-export interface TraceWalkthroughAnswer {
-    form: 'thread';
-    seconds: number;
-    entries: TraceWalkthroughEntry[];
-}
-
-export type TraceAnswer = TraceTreeAnswer | TraceWalkthroughAnswer;
+export type TraceAnswer = TraceTreeAnswer | ProvenanceAnswer;
 
 /**
  * Build the trace material for a session: its user-made charts in creation
