@@ -118,6 +118,18 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     type PanelTab = 'recall' | 'combos' | 'charts' | 'trace' | 'results' | 'author';
     const [tab, setTab] = useState<PanelTab>('recall');
 
+    // The live slices arrive as a fresh object on every store tick — chart-usage
+    // telemetry alone dispatches every 15s while a chart is focused — so they
+    // are read through a ref and the builds below key on WHICH CHARTS exist
+    // instead. Keying on the object itself rebuilt the quiz under a participant
+    // mid-question, throwing them back to the first question of every part.
+    const liveStateRef = useRef(liveState);
+    liveStateRef.current = liveState;
+    const liveKey = useMemo(() => {
+        const s = liveState as { charts?: { id: string }[] } | undefined;
+        return s ? (s.charts ?? []).map(c => c.id).join(',') : 'stored';
+    }, [liveState]);
+
     // ── shared generation (quiz mode drives it; author mode reuses the session) ──
     const [quiz, setQuiz] = useState<GeneratedQuiz | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -173,7 +185,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         (async () => {
             try {
                 const generated = await generateQuizForSession({
-                    sessionId, sessionName, liveState,
+                    sessionId, sessionName, liveState: liveStateRef.current,
                     onProgress: (done, total, label) => {
                         if (runIdRef.current === runId) setProgress({ done, total, label });
                     },
@@ -185,7 +197,10 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 setError(e?.message || t('quiz.generateFailed', { defaultValue: 'The quiz could not be made for this session.' }));
             }
         })();
-    }, [sessionId, sessionName, liveState, t]);
+        // `t` is deliberately absent: i18next hands back a new function when a
+        // namespace finishes loading, which would restart the quiz.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sessionId, sessionName, liveKey]);
 
     // Back to part 1 when the panel is pointed at a different session — but
     // ONLY then. The generation effect above re-fires on live-slice ticks, and
@@ -203,7 +218,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     // participant answers it while the look-alike charts are still being made.
     useEffect(() => {
         let live = true;
-        loadRecallMaterial({ sessionId, liveState })
+        loadRecallMaterial({ sessionId, liveState: liveStateRef.current })
             .then(m => {
                 if (!live) return;
                 setRecallMaterial(m);
@@ -216,7 +231,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 if (live) setRecallFailed(true);
             });
         return () => { live = false; };
-    }, [sessionId, liveState]);
+    }, [sessionId, liveKey]);
 
     // Form B's items, derived from the same trace material form A is scored
     // against — seeded, so re-entering the form does not reshuffle the moves.
@@ -302,13 +317,13 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         setTraceStage(form);
         if (traceMaterial && traceMaterial !== 'failed') return;   // built or in flight
         setTraceMaterial('loading');
-        loadTraceMaterial({ sessionId, liveState })
+        loadTraceMaterial({ sessionId, liveState: liveStateRef.current })
             .then(m => setTraceMaterial(m))
             .catch(e => {
                 console.warn('[quiz] trace material could not be built:', e?.message);
                 setTraceMaterial('failed');
             });
-    }, [traceMaterial, sessionId, liveState]);
+    }, [traceMaterial, sessionId]);
 
     const handleDownload = useCallback(() => {
         const completedAt = new Date().toISOString();
