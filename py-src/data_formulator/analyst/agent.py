@@ -98,20 +98,6 @@ _REPORT_GATE_MESSAGE = (
     "answer in short plain text pointing the user to the report panel."
 )
 
-# ── Describe-skill gate (user study) ──────────────────────────────────────
-# The two study chat modes attach a per-chart caption via the describe skill's
-# ``describe_chart`` action — executor captions report Level-2 computable data
-# facts, analyst_guided captions state the Level-3 perceived pattern (Lundgard
-# & Satyanarayan's semantic levels; the level policy lives in the mode files).
-# The skill is auto-loaded for those modes (no ``load_skill`` step, so no
-# ``[SKILL LOADED]`` banner exists for it) and does not exist anywhere else:
-# never advertised in the registry block, never loadable, never rehydrated.
-_DESCRIBE_SKILL = "describe"
-_DESCRIBE_MODES = frozenset({"executor", "analyst_guided"})
-_DESCRIBE_GATE_MESSAGE = (
-    "The 'describe' skill is not available in this session."
-)
-
 # ── Action-argument coercion ──────────────────────────────────────────────
 # Weaker models sometimes JSON-encode a nested action argument as a string
 # (e.g. ``"chart": "{...}"``). Parse those back to objects before dispatch so
@@ -217,7 +203,7 @@ keeping them straight is essential:
   **independent** — none depends on another's result — so call as many as you
   need, across as many rounds as you need, until you have enough to act.
 - **Actions** (committing — shown to the user). A discrete operation like
-  `visualize`, `ask_user`, `delegate`{describe_chart_mention}{write_report_mention}. Each renders a user-visible surface, and its result is
+  `visualize`, `ask_user`, `delegate`{write_report_mention}. Each renders a user-visible surface, and its result is
   returned to you just like a tool result so you can react to it.
 
 **Actions are sequential — take exactly one, then wait for its result.** This is
@@ -373,13 +359,6 @@ class AnalystAgent:
         # available; ``_loaded_skills`` only tracks which skills the model has
         # been *exposed* to (tools + actions + guidance) this run.
         self._loaded_skills: set[str] = set()
-        # Caption enforcement (describe modes only): charts created this run,
-        # the subset already captioned via describe_chart, and how many close
-        # attempts were bounced back for a missing caption (bounded — see
-        # _undescribed_run_charts / the nudges in run()).
-        self._run_created_chart_ids: list[str] = []
-        self._described_chart_ids: set[str] = set()
-        self._describe_nudges = 0
         # Free-form payload for skill dispatch (charts, etc.), set per run.
         self._run_payload: dict[str, Any] = {}
         # Live-streaming bookkeeping (design-docs/36 §5). ``_streamed_channels``
@@ -457,14 +436,6 @@ class AnalystAgent:
         # (e.g. the report skill rebuilds [AVAILABLE CHARTS] + thread
         # context).
         self._loaded_skills = {_CORE_SKILL}
-        # Study chat modes: the describe skill is auto-loaded, so its
-        # ``describe_chart`` action is legal from the first turn (its caption
-        # policy lives in the mode prompt; there is no SKILL.md body to inject).
-        if self._describe_skill_enabled():
-            self._loaded_skills.add(_DESCRIBE_SKILL)
-        self._run_created_chart_ids = []
-        self._described_chart_ids = set()
-        self._describe_nudges = 0
         self._run_payload = {
             "input_tables": input_tables,
             "charts": charts or [],
@@ -570,23 +541,6 @@ class AnalystAgent:
                         self._log_session_end(rlog, final_status, iteration, total_llm_calls, session_start_time)
                         return
 
-                    # ── Caption enforcement (describe modes) ─────────────────
-                    # A normal close with an uncaptioned run-created chart is
-                    # bounced back (bounded): the closing text already landed in
-                    # the trajectory as an assistant turn, so a [SYSTEM] user
-                    # nudge keeps the conversation well-formed and the model
-                    # calls describe_chart before closing for real. Exhausted
-                    # nudges fall through — never deadlock the run over it.
-                    undescribed = self._undescribed_run_charts()
-                    if action_reason == "done" and undescribed and self._describe_nudges < 2:
-                        self._describe_nudges += 1
-                        trajectory.append({
-                            "role": "user",
-                            "content": self._describe_nudge_message(undescribed),
-                        })
-                        rlog.log("describe_nudge", charts=undescribed, at="close")
-                        continue
-
                     final_status = (
                         "tool_rounds_exhausted"
                         if action_reason == "tool_rounds_exhausted"
@@ -629,10 +583,6 @@ class AnalystAgent:
                     # don't send the model into a load→refuse→retry loop.
                     if owner == _REPORT_SKILL and self._report_skill_gated():
                         gate_message = f"[GATED] {_REPORT_GATE_MESSAGE}"
-                    elif owner == _DESCRIBE_SKILL and not self._describe_skill_enabled():
-                        # describe is auto-loaded where enabled, so reaching this
-                        # branch means it isn't available in this session at all.
-                        gate_message = f"[GATED] {_DESCRIBE_GATE_MESSAGE}"
                     else:
                         gate_message = (
                             f"[GATED] The '{action_type}' action requires the "
@@ -645,23 +595,6 @@ class AnalystAgent:
                     rlog.log("action_gated", action=action_type, skill=owner,
                              iteration=iteration)
                     continue
-
-                # --- Caption enforcement (describe modes): the analyst mode
-                #     closes runs with ask_user, which is terminal — so an
-                #     uncaptioned chart must be caught BEFORE dispatch. Bounced
-                #     like a gate: the action is not executed, its tool-call
-                #     result carries the nudge, and the model re-decides.
-                #     Bounded by the same counter as the plain-text close.
-                if action_type == "ask_user":
-                    undescribed = self._undescribed_run_charts()
-                    if undescribed and self._describe_nudges < 2:
-                        self._describe_nudges += 1
-                        self._set_action_observation(
-                            trajectory, action_tool_call_id,
-                            self._describe_nudge_message(undescribed),
-                        )
-                        rlog.log("describe_nudge", charts=undescribed, at="ask_user")
-                        continue
 
                 # --- DISPATCH: the owning skill renders the action and RETURNS
                 #     an observation string; the shell feeds it back as the
@@ -771,42 +704,11 @@ class AnalystAgent:
                     # trajectory, so a pasted/forged one must not open the gate.
                     if name == _REPORT_SKILL and self._report_skill_gated():
                         continue
-                    # The describe skill is auto-loaded (bannerless) where it is
-                    # enabled and nonexistent elsewhere, so no banner for it is
-                    # ever legitimate — ignore pasted/forged ones outright.
-                    if name == _DESCRIBE_SKILL and not self._describe_skill_enabled():
-                        continue
                     self._loaded_skills.add(name)
 
     def _report_skill_gated(self) -> bool:
         """Study modes disable the report skill (see _REPORT_GATE_MESSAGE)."""
         return self.analysis_mode in _REPORT_GATED_MODES
-
-    def _describe_skill_enabled(self) -> bool:
-        """The describe skill exists only in the study chat modes, where it is
-        auto-loaded (see _DESCRIBE_MODES)."""
-        return self.analysis_mode in _DESCRIBE_MODES
-
-    def _undescribed_run_charts(self) -> list[str]:
-        """Chart ids created this run that have no describe_chart caption yet.
-
-        Only meaningful in the describe modes, where every run-created chart
-        must carry a caption (the study manipulation depends on consistent
-        coverage); empty elsewhere so enforcement is a no-op."""
-        if not self._describe_skill_enabled():
-            return []
-        return [
-            cid for cid in self._run_created_chart_ids
-            if cid not in self._described_chart_ids
-        ]
-
-    def _describe_nudge_message(self, undescribed: list[str]) -> str:
-        ids = ", ".join(f"`{cid}`" for cid in undescribed)
-        return (
-            f"[SYSTEM] Chart(s) {ids} have no caption yet. Call `describe_chart` "
-            "for each of them now — following your mode's Chart captions rules — "
-            "before you close the run."
-        )
 
     def _load_skill_into_context(
         self, name: str, trajectory: list[dict],
@@ -844,8 +746,6 @@ class AnalystAgent:
         # _loaded_skills, so its actions stay gated too.
         if name == _REPORT_SKILL and self._report_skill_gated():
             return False, _REPORT_GATE_MESSAGE, None
-        if name == _DESCRIBE_SKILL and not self._describe_skill_enabled():
-            return False, _DESCRIBE_GATE_MESSAGE, None
         if not self.registry.has(name):
             return False, f"Unknown skill: {name!r}", None
         if name in self._loaded_skills:
@@ -998,10 +898,6 @@ class AnalystAgent:
                             "display_instruction": content.get("question", ""),
                             "code": result.get("code", ""),
                         })
-                    elif etype == "chart_description":
-                        # Caption enforcement bookkeeping (describe modes).
-                        if ev.get("chart_id"):
-                            self._described_chart_ids.add(ev["chart_id"])
                     elif etype in ("delegate", "interact"):
                         # Both pause the run; the frontend needs the trajectory +
                         # step count to resume after the user answers / hands off.
@@ -1070,9 +966,6 @@ class AnalystAgent:
             "code": transform_result.get("code", ""),
             "chart_data": {"name": table_name, "rows": rows[:50]},
         })
-        # Caption enforcement bookkeeping (describe modes): a run-created chart
-        # must be captioned before the run may close.
-        self._run_created_chart_ids.append(chart_id)
 
     def run_explore_code(
         self, code: str, input_tables: list[dict[str, Any]],
@@ -1359,7 +1252,7 @@ class AnalystAgent:
         # describe is never advertised: it is auto-loaded where enabled and
         # nonexistent elsewhere, so it is not a load_skill candidate anywhere.
         skills_block = self.registry.render_registry_block(
-            exclude=(_REPORT_SKILL, _DESCRIBE_SKILL) if self._report_skill_gated() else (_DESCRIBE_SKILL,),
+            exclude=(_REPORT_SKILL,) if self._report_skill_gated() else (),
         ) or "_(no loadable skills)_"
 
         # Fill the system frame's slots via plain substitution (brace-safe: any
@@ -1378,11 +1271,6 @@ class AnalystAgent:
                 ""
                 if self._report_skill_gated()
                 else ", and (once the report skill is loaded)\n  `write_report`"
-            ),
-            # Study chat modes list describe_chart among the baseline actions
-            # (the describe skill is auto-loaded there); empty everywhere else.
-            "{describe_chart_mention}": (
-                ", `describe_chart`" if self._describe_skill_enabled() else ""
             ),
         }
         prompt = SYSTEM_PROMPT
@@ -1612,12 +1500,10 @@ class AnalystAgent:
         extra_tools = self.registry.tools_for(self._loaded_skills)
         action_tools = self.registry.action_tools_for(self._loaded_skills)
         # The load_skill enum offers only skills genuinely loadable this run:
-        # describe is never one (auto-loaded where enabled, absent elsewhere)
-        # and the report skill is hard-gated in the study modes.
+        # the report skill is hard-gated in the study modes.
         loadable = [
             n for n in self.registry.gated_skill_names()
-            if n != _DESCRIBE_SKILL
-            and not (n == _REPORT_SKILL and self._report_skill_gated())
+            if not (n == _REPORT_SKILL and self._report_skill_gated())
         ]
         return build_tools(
             loadable,

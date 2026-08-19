@@ -49,7 +49,11 @@ export const attributeChipSx = (opts: {
     restingBg?: string;
     restingText?: string;
 }) => ({
-    height: 27,
+    // The palettes lay these out in a grid, so a button fills its cell: every
+    // attribute gets the same target, whatever its name is worth in pixels.
+    width: '100%',
+    justifyContent: 'flex-start',
+    height: 30,
     fontSize: 12,
     ...mono,
     borderRadius: radius.sm,
@@ -67,6 +71,19 @@ export const attributeChipSx = (opts: {
     },
 });
 
+/**
+ * The attribute palette's layout: a FIXED number of buttons per row rather
+ * than a wrapped list. Names like `PHASE_OF_FLIGHT` used to pack a row
+ * shoulder to shoulder while the next row held two; a grid gives every
+ * attribute the same target and keeps the rows apart.
+ */
+export const paletteGridSx = (wide: boolean) => ({
+    display: 'grid',
+    gridTemplateColumns: `repeat(${wide ? 4 : 2}, minmax(0, 1fr))`,
+    columnGap: 1.5,
+    rowGap: 1.5,
+});
+
 interface FieldRecallStepProps {
     material: RecallMaterial;
     /** the attributes named so far, in the order they were added */
@@ -75,13 +92,12 @@ interface FieldRecallStepProps {
     /** Move on to the chart questions. Disabled while they are still generating. */
     onContinue: () => void;
     continueDisabled?: boolean;
-    continueHint?: string;
     /** narrow layouts get a shorter table */
     wide?: boolean;
 }
 
 export const FieldRecallStep: FC<FieldRecallStepProps> = ({
-    material, fields, onChange, onContinue, continueDisabled, continueHint, wide = true,
+    material, fields, onChange, onContinue, continueDisabled, wide = true,
 }) => {
     const { t } = useTranslation();
     const theme = useTheme();
@@ -93,13 +109,9 @@ export const FieldRecallStep: FC<FieldRecallStepProps> = ({
 
     return (
         <Box sx={{ p: 1.5 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 600 }}>
+            {/* Just the question — the how-to lives on the quiz's intro tab. */}
+            <Typography sx={{ fontSize: 18, fontWeight: 700, mb: 2 }}>
                 {t('quiz.recallTitle', { defaultValue: 'Which attributes do you remember exploring?' })}
-            </Typography>
-            <Typography sx={{ fontSize: 12.5, color: 'text.secondary', maxWidth: 820, mb: 1.5 }}>
-                {t('quiz.recallIntro', {
-                    defaultValue: 'This is the data you worked with. Click every attribute you remember using in your analysis. Click one again to take it back.',
-                })}
             </Typography>
 
             {/* The data, in the canvas's own grid. */}
@@ -110,8 +122,8 @@ export const FieldRecallStep: FC<FieldRecallStepProps> = ({
             />
 
             {/* What has been named so far. */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center', mt: 1.5, minHeight: 27 }}>
-                <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mr: 0.5 }}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, alignItems: 'center', mt: 2.5, minHeight: 27 }}>
+                <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mr: 0.5 }}>
                     {t('quiz.recallChosen', { count: fields.length, defaultValue: `Your attributes (${fields.length}):` })}
                 </Typography>
                 {fields.length === 0
@@ -129,8 +141,10 @@ export const FieldRecallStep: FC<FieldRecallStepProps> = ({
                     ))}
             </Box>
 
-            {/* Every column, click to add or remove. */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1.5 }}>
+            {/* Every column, click to add or remove — a fixed count per row, so
+                the list reads as rows of equal buttons rather than a packed
+                block of text. */}
+            <Box sx={{ ...paletteGridSx(wide), mt: 2 }}>
                 {material.fields.map(name => (
                     <Chip
                         key={name} size="small" clickable onClick={() => toggle(name)}
@@ -141,12 +155,10 @@ export const FieldRecallStep: FC<FieldRecallStepProps> = ({
             </Box>
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2.5 }}>
-                <Button size="small" variant="contained" onClick={onContinue} disabled={continueDisabled} sx={{ fontSize: 12, textTransform: 'none' }}>
-                    {t('quiz.recallContinue', { defaultValue: 'Done — continue to the combinations' })}
+                <Button variant="contained" onClick={onContinue} disabled={continueDisabled}
+                    sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
+                    {t('quiz.confirm', { defaultValue: 'Confirm' })}
                 </Button>
-                {continueDisabled && continueHint && (
-                    <Typography sx={{ fontSize: 11.5, color: 'text.disabled' }}>{continueHint}</Typography>
-                )}
             </Box>
         </Box>
     );

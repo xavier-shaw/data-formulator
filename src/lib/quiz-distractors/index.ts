@@ -20,6 +20,8 @@
 
 export * from './extract';
 export * from './distance';
+export * from './curated';
+export * from './messageOps';
 export * from './generators';
 export * from './guard';
 export * from './seeded';

@@ -1,0 +1,330 @@
+version: '1.1'
+created_at: '2026-08-08T00:17:41.445514+00:00'
+updated_at: '2026-08-08T00:31:37.654125+00:00'
+tables:
+  faa_wildlife_strikes:
+    source_type: data_loader
+    filename: faa_wildlife_strikes.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:17:41.637420+00:00'
+    content_hash: ac0b004af425f1cd9aa13519c0f9369f
+    file_size: 632293
+    loader_type: SampleDatasetsLoader
+    loader_params: {}
+    source_table: FAA Wildlife Strikes
+    import_options:
+      size: 2000000
+    last_synced: '2026-08-08T00:17:41.637420+00:00'
+    row_count: 21948
+    columns:
+    - name: INDEX_NR
+      dtype: integer
+    - name: INCIDENT_DATE
+      dtype: string
+    - name: TIME_OF_DAY
+      dtype: string
+    - name: AIRPORT
+      dtype: string
+    - name: LATITUDE
+      dtype: string
+    - name: LONGITUDE
+      dtype: string
+    - name: STATE
+      dtype: string
+    - name: OPERATOR
+      dtype: string
+    - name: AIRCRAFT
+      dtype: string
+    - name: AC_CLASS
+      dtype: string
+    - name: AC_MASS
+      dtype: string
+    - name: TYPE_ENG
+      dtype: string
+    - name: NUM_ENGS
+      dtype: number
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: HEIGHT
+      dtype: number
+    - name: SPEED
+      dtype: number
+    - name: DISTANCE
+      dtype: number
+    - name: SKY
+      dtype: string
+    - name: PRECIPITATION
+      dtype: string
+    - name: DAMAGE_LEVEL
+      dtype: string
+    - name: SPECIES_ID
+      dtype: string
+    - name: SPECIES
+      dtype: string
+    - name: NUM_STRUCK
+      dtype: string
+    - name: SIZE
+      dtype: string
+    description: FAA reports of wildlife strikes on aircraft (mostly birds) from 1990-2026,
+      with incident date and time of day, airport and coordinates, state, operator,
+      aircraft type/class/mass, engine type and count, flight phase, height, speed,
+      distance, sky and precipitation conditions, damage severity (Minor / Substantial
+      / Destroyed / Undetermined), and the species, size, and number of animals struck.
+  d_strikes_by_year:
+    source_type: data_loader
+    filename: d_strikes_by_year.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:18:03.973574+00:00'
+    content_hash: 21adc7d66adf72efb57802bf43816713
+    file_size: 2610
+    last_synced: '2026-08-08T00:18:03.973574+00:00'
+    row_count: 37
+    columns:
+    - name: incident_year
+      dtype: integer
+    - name: strike_count
+      dtype: integer
+  d_monthly_strikes:
+    source_type: data_loader
+    filename: d_monthly_strikes.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:19:46.959403+00:00'
+    content_hash: df7db9e14ee8cff9e82e6e368e6ff3bb
+    file_size: 5083
+    last_synced: '2026-08-08T00:19:46.959403+00:00'
+    row_count: 436
+    columns:
+    - name: year_month
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_monthly_strikes_2:
+    source_type: data_loader
+    filename: d_monthly_strikes_2.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:20:01.338921+00:00'
+    content_hash: 4f06452574c97b12cbee97f7d46528fc
+    file_size: 2975
+    last_synced: '2026-08-08T00:20:01.338921+00:00'
+    row_count: 12
+    columns:
+    - name: calendar_month
+      dtype: string
+    - name: strike_count
+      dtype: integer
+    - name: month_num
+      dtype: integer
+  d_monthly_state_strikes:
+    source_type: data_loader
+    filename: d_monthly_state_strikes.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:21:31.837243+00:00'
+    content_hash: 2a37577c37ab39e11bd658ca2217cac4
+    file_size: 62087
+    last_synced: '2026-08-08T00:21:31.837243+00:00'
+    row_count: 9504
+    columns:
+    - name: STATE
+      dtype: string
+    - name: month_num
+      dtype: integer
+    - name: calendar_month
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_monthly_state_strikes_2:
+    source_type: data_loader
+    filename: d_monthly_state_strikes_2.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:21:40.933269+00:00'
+    content_hash: 57f7cb189eacdfb457be09ce3c48b3e1
+    file_size: 9467
+    last_synced: '2026-08-08T00:21:40.933269+00:00'
+    row_count: 684
+    columns:
+    - name: STATE
+      dtype: string
+    - name: month_num
+      dtype: integer
+    - name: calendar_month
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_monthly_time_strikes:
+    source_type: data_loader
+    filename: d_monthly_time_strikes.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:22:30.231050+00:00'
+    content_hash: da152cdda0eed7e28621d752c447611f
+    file_size: 3737
+    last_synced: '2026-08-08T00:22:30.231050+00:00'
+    row_count: 48
+    columns:
+    - name: month_num
+      dtype: integer
+    - name: calendar_month
+      dtype: string
+    - name: TIME_OF_DAY
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_d_time_of_day_strikes:
+    source_type: data_loader
+    filename: d_d_time_of_day_strikes.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:24:06.376899+00:00'
+    content_hash: 0348bc42d0fac7584d9dfbdf1f886314
+    file_size: 2269
+    last_synced: '2026-08-08T00:24:06.376899+00:00'
+    row_count: 4
+    columns:
+    - name: TIME_OF_DAY
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_damage_by_time:
+    source_type: data_loader
+    filename: d_damage_by_time.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:24:46.542283+00:00'
+    content_hash: ea00adbafb221db24c636da3553d3ed4
+    file_size: 3115
+    last_synced: '2026-08-08T00:24:46.542283+00:00'
+    row_count: 16
+    columns:
+    - name: TIME_OF_DAY
+      dtype: string
+    - name: DAMAGE_LEVEL
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_airport_points:
+    source_type: data_loader
+    filename: d_airport_points.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:25:22.255556+00:00'
+    content_hash: 98f2dd13613fd75a9826b03b7dfd2ac2
+    file_size: 76881
+    last_synced: '2026-08-08T00:25:22.255556+00:00'
+    row_count: 2029
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: STATE
+      dtype: string
+    - name: latitude
+      dtype: number
+    - name: longitude
+      dtype: number
+    - name: strike_count
+      dtype: integer
+  d_d_airport_us_points:
+    source_type: data_loader
+    filename: d_d_airport_us_points.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:25:41.951904+00:00'
+    content_hash: 5a8f25c573a61ce75ce55e472f3f8695
+    file_size: 71753
+    last_synced: '2026-08-08T00:25:41.951904+00:00'
+    row_count: 1889
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: STATE
+      dtype: string
+    - name: latitude
+      dtype: number
+    - name: longitude
+      dtype: number
+    - name: strike_count
+      dtype: integer
+  d_d_airport_rank:
+    source_type: data_loader
+    filename: d_d_airport_rank.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:26:28.929454+00:00'
+    content_hash: 9010626f5536d22033505198c5ab4b8c
+    file_size: 3600
+    last_synced: '2026-08-08T00:26:28.929454+00:00'
+    row_count: 25
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_airport_rank:
+    source_type: data_loader
+    filename: d_airport_rank.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:27:21.654730+00:00'
+    content_hash: 642664f646e027396cba9ddbb8bc9c6e
+    file_size: 3603
+    last_synced: '2026-08-08T00:27:21.654730+00:00'
+    row_count: 25
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_species_rank:
+    source_type: data_loader
+    filename: d_species_rank.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:28:26.304181+00:00'
+    content_hash: 193d05d1edaa73078e49ef19222290e3
+    file_size: 3348
+    last_synced: '2026-08-08T00:28:26.304181+00:00'
+    row_count: 25
+    columns:
+    - name: SPECIES
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_species_damage:
+    source_type: data_loader
+    filename: d_species_damage.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:28:48.197258+00:00'
+    content_hash: 340cf94699eaa6a80b24ca18158f488d
+    file_size: 4272
+    last_synced: '2026-08-08T00:28:48.197258+00:00'
+    row_count: 57
+    columns:
+    - name: SPECIES
+      dtype: string
+    - name: DAMAGE_LEVEL
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_d_species_phase:
+    source_type: data_loader
+    filename: d_d_species_phase.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:30:38.406613+00:00'
+    content_hash: 2ac64762e30beebaf0795313d30ad6e6
+    file_size: 5027
+    last_synced: '2026-08-08T00:30:38.406613+00:00'
+    row_count: 120
+    columns:
+    - name: SPECIES
+      dtype: string
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_damage_by_phase:
+    source_type: data_loader
+    filename: d_damage_by_phase.parquet
+    file_type: parquet
+    created_at: '2026-08-08T00:31:37.640076+00:00'
+    content_hash: dcc904add7b740c3b673e29b94976b05
+    file_size: 3900
+    last_synced: '2026-08-08T00:31:37.640076+00:00'
+    row_count: 41
+    columns:
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: DAMAGE_LEVEL
+      dtype: string
+    - name: strike_count
+      dtype: integer

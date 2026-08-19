@@ -86,6 +86,7 @@ import {
 import { About } from '../views/About';
 import ChartGallery from '../gallery/ChartGallery';
 import { ChartMemoryPage } from '../views/ChartMemoryPage';
+import { QuizModeratorPage } from '../views/QuizModeratorPage';
 import { MessageSnackbar } from '../views/MessageSnackbar';
 import { ChartRenderService } from '../views/ChartRenderService';
 import { DictTable } from '../components/ComponentType';
@@ -1332,6 +1333,13 @@ export const AppFC: FC<AppFCProps> = function AppFC(appProps) {
                     // from ?session=&name=, defaulting to the open one.
                     path: "chart-memory",
                     element: <ChartMemoryPage />,
+                },
+                {
+                    // Researcher-only, URL-reachable: configure a session's
+                    // quiz (recognition selection, provenance sampling)
+                    // before the participant takes it.
+                    path: "quiz-moderator",
+                    element: <QuizModeratorPage />,
                 },
                 {
                     path: "*",

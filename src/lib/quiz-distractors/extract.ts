@@ -53,6 +53,8 @@ export interface SessionChart {
     focusMs: number;
     /** number of times the chart was viewed */
     visits: number;
+    /** true when the participant put the chart in their findings report */
+    inReport: boolean;
 }
 
 export interface SessionData {
@@ -75,6 +77,8 @@ export interface SessionStateLike {
     tables?: any[];
     conceptShelfItems?: any[];
     chartUsage?: Record<string, { focusMs?: number; visits?: number }>;
+    /** "My findings" membership (dfSlice.findingsChartIds); absent in older sessions */
+    findingsChartIds?: string[];
 }
 
 /**
@@ -94,6 +98,11 @@ export function extractSession(s: SessionStateLike): SessionData {
     // Per-chart viewing telemetry (chartUsageTelemetry.ts → state.chartUsage).
     // Absent in older sessions; treat missing entries as never focused.
     const usage: Record<string, { focusMs?: number; visits?: number }> = s.chartUsage ?? {};
+
+    // Report membership — the charts the participant selected into "My
+    // findings". A missing list means no report, so every chart counts as
+    // intermediate.
+    const inReport = new Set(s.findingsChartIds ?? []);
 
     const tables: SessionData['tables'] = {};
     let sourceTable: SessionData['sourceTable'];
@@ -131,6 +140,7 @@ export function extractSession(s: SessionStateLike): SessionData {
             metadata: table.metadata,
             focusMs: usage[c.id]?.focusMs ?? 0,
             visits: usage[c.id]?.visits ?? 0,
+            inReport: inReport.has(c.id),
         });
     }
 
@@ -140,77 +150,6 @@ export function extractSession(s: SessionStateLike): SessionData {
 // ── Compilation (mirrors src/app/utils.tsx assembleVegaChart) ────────────
 
 export const CANVAS = { width: 300, height: 220 };
-
-/**
- * Alternate palettes for the color-shift form lure. Same lightness texture as
- * the default tableau10, hues rotated, so a shifted chart still looks like an
- * app chart — just not the one the participant made.
- */
-const QUIZ_PALETTES: string[][] = [
-    ['#e45756', '#f58518', '#72b7b2', '#4c78a8', '#54a24b', '#eeca3b', '#b279a2', '#ff9da6', '#9d755d', '#bab0ac'],
-    ['#54a24b', '#b279a2', '#f58518', '#72b7b2', '#e45756', '#4c78a8', '#eeca3b', '#9d755d', '#ff9da6', '#bab0ac'],
-];
-
-/**
- * Recolor a compiled VL spec in place: rotate the categorical range and remap
- * every explicit mark/encoding color a template hard-coded. Charts whose color
- * comes entirely from the default config pick it up via `config.range` /
- * `config.mark`; the render-identity guard drops any chart where the shift
- * turned out to be inert.
- */
-function recolorVl(vl: any, shift: number): void {
-    const palette = QUIZ_PALETTES[(shift - 1 + QUIZ_PALETTES.length) % QUIZ_PALETTES.length];
-    const remap = new Map<string, string>();
-    let next = 0;
-    const replacement = (orig: string) => {
-        if (!remap.has(orig)) remap.set(orig, palette[next++ % palette.length]);
-        return remap.get(orig)!;
-    };
-    const isColor = (v: any) => typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v);
-    const walk = (o: any): void => {
-        if (!o || typeof o !== 'object') return;
-        if (o.mark && typeof o.mark === 'object' && isColor(o.mark.color)) {
-            o.mark.color = replacement(o.mark.color);
-        }
-        if (o.color && typeof o.color === 'object' && isColor(o.color.value)) {
-            o.color.value = replacement(o.color.value);
-        }
-        if (o.scale && Array.isArray(o.scale.range) && o.scale.range.every(isColor)) {
-            o.scale.range = o.scale.range.map(replacement);
-        }
-        for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v);
-    };
-    walk(vl);
-    vl.config = {
-        ...vl.config,
-        range: { ...vl.config?.range, category: palette },
-        mark: { ...vl.config?.mark, color: palette[0] },
-    };
-}
-
-/**
- * Put the named quantitative field on a log scale, wherever it is encoded on a
- * positional channel. Generation only offers this for strictly-positive
- * measures, so the log domain is always valid.
- */
-function injectLogScale(vl: any, field: string): void {
-    const unescape = (s: string) => String(s).replace(/\\/g, '');
-    const walk = (o: any): void => {
-        if (!o || typeof o !== 'object') return;
-        if (o.encoding && typeof o.encoding === 'object') {
-            for (const ch of ['x', 'y']) {
-                const def = o.encoding[ch];
-                if (def && typeof def.field === 'string' && unescape(def.field) === field) {
-                    def.scale = { ...def.scale, type: 'log' };
-                    // a log scale cannot include zero, and stacking is meaningless on it
-                    if ('stack' in def) def.stack = null;
-                }
-            }
-        }
-        for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v);
-    };
-    walk(vl);
-}
 
 export function compileToVegaLite(
     spec: ChartLevelSpec,
@@ -224,12 +163,12 @@ export function compileToVegaLite(
         if (meta.displayName) displayNames[name] = meta.displayName;
     }
 
-    // Quiz-internal directives ride in config under `_quiz*` keys — the
-    // assembler never sees them (they are applied to the compiled VL below),
-    // and specDiff ignores them when costing config changes.
-    const config = spec.config ?? {};
+    // `_quiz*` config keys are reserved for quiz-internal directives that a
+    // lure applies to the COMPILED spec. No generator emits one today (the
+    // color-shift and log-scale lures were removed), but the assembler must
+    // never see such a key, and specDiff must not cost it.
     const chartProperties = Object.fromEntries(
-        Object.entries(config).filter(([k]) => !k.startsWith('_quiz')));
+        Object.entries(spec.config ?? {}).filter(([k]) => !k.startsWith('_quiz')));
 
     const vl = assembleVegaLite({
         data: { values: rows },
@@ -248,20 +187,40 @@ export function compileToVegaLite(
         // Strip assembler by-products; give quiz-friendly white background.
         delete vl._options;
         vl.background = 'white';
-        if (typeof config._quizColorShift === 'number') recolorVl(vl, config._quizColorShift);
-        if (typeof config._quizLogScaleField === 'string') injectLogScale(vl, config._quizLogScaleField);
     }
     return vl;
 }
 
-/** Quick validity probe: does this chart-level spec compile to a non-trivial VL spec? */
+/**
+ * Quick validity probe: does this chart-level spec compile to a non-trivial VL
+ * spec?
+ *
+ * A mark alone is not enough. The assembler can accept a field map, drop every
+ * channel it cannot use, and hand back `{ mark: "point", encoding: {} }` — a
+ * chart of nothing, which the renderer then rejects with "layout size is
+ * step". So the probe also demands that at least one channel carries a field.
+ * It is still only a probe: the render guard stays the authority.
+ */
 export function compiles(spec: ChartLevelSpec, rows: any[], metadata: Record<string, FieldMeta>): boolean {
     try {
         const vl = compileToVegaLite(spec, rows, metadata);
-        return !!vl && typeof vl === 'object' && (!!vl.mark || !!vl.layer || !!vl.hconcat || !!vl.vconcat || !!vl.facet || !!vl.spec);
+        if (!vl || typeof vl !== 'object') return false;
+        if (!(vl.mark || vl.layer || vl.hconcat || vl.vconcat || vl.facet || vl.spec)) return false;
+        return encodesAField(vl);
     } catch {
         return false;
     }
+}
+
+/** Does any channel anywhere in a compiled VL spec carry a field? */
+function encodesAField(o: any): boolean {
+    if (!o || typeof o !== 'object') return false;
+    if (o.encoding && typeof o.encoding === 'object') {
+        for (const def of Object.values<any>(o.encoding)) {
+            if (def && typeof def === 'object' && (def.field || def.aggregate === 'count')) return true;
+        }
+    }
+    return Object.values(o).some(v => v && typeof v === 'object' && encodesAField(v));
 }
 
 // ── Small utilities shared by generators ─────────────────────────────────

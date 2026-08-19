@@ -54,8 +54,12 @@ const MARK_FAMILIES: Record<string, string> = {
     'Histogram': 'bar', 'Waterfall Chart': 'bar',
     'Line Chart': 'line', 'Area Chart': 'line', 'Bump Chart': 'line', 'Streamgraph': 'line',
     'Scatter Plot': 'point', 'Strip Plot': 'point', 'Ranged Dot Plot': 'point', 'Regression': 'point',
+    'Boxplot': 'point',
+    'Density Plot': 'line',
+    'Candlestick Chart': 'bar',
     'Pie Chart': 'radial', 'Rose Chart': 'radial', 'Radar Chart': 'radial',
     'Heatmap': 'grid',
+    'US Map': 'geo', 'World Map': 'geo',
 };
 
 /** Family adjacency: which families are perceptually "one step" apart. */
@@ -65,6 +69,7 @@ const FAMILY_ADJACENT: Record<string, string[]> = {
     point: ['bar', 'line', 'grid'],
     grid: ['point'],
     radial: [],
+    geo: [],
 };
 
 export function markTransitionCost(a: string, b: string): number {

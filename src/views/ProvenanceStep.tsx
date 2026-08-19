@@ -2,24 +2,28 @@
 // Licensed under the MIT License.
 
 /**
- * ProvenanceStep — reasoning-trace form B: which chart came next, and why.
+ * ProvenanceStep — reasoning-trace form B: which chart did you make next?
  *
- * One item at a time, in two beats. First the context — the chart made before
- * this one, then the chart itself — and three real charts from the session to
- * choose between: which did you make next? Confirming REVEALS the true next
- * chart, and only then does the second beat ask why that move was made, so a
- * wrong pick still produces a rationale about the move that really happened.
+ * One item at a time. The context — the chart made before this one, then the
+ * chart itself — and three real charts from the session to choose between.
+ * Confirming REVEALS the true next chart, and the next item follows.
+ *
+ * The step FILLS the height it is given and never scrolls: the two chart rows
+ * take every pixel the question, the rating and the button leave, so an item
+ * is always one view. That is why the rows are flex weights rather than
+ * pixel heights — no constant has to be kept in step with the text above.
  *
  * Material and scoring live in app/provenanceQuiz.ts.
  */
 
 import { FC, useMemo, useRef, useState } from 'react';
-import { Box, Button, TextField, Typography, alpha, useTheme } from '@mui/material';
+import { Box, Button, Typography, alpha, useTheme } from '@mui/material';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import { useTranslation } from 'react-i18next';
 import { borderColor, radius } from '../app/tokens';
+import { CONFIDENCE_DEFAULT, ConfidenceRater } from './ConfidenceRater';
 import { TraceChart } from '../app/reasoningTrace';
 import {
     ProvenanceAnswer, ProvenanceMaterial, ProvenanceResponse, buildProvenanceAnswer,
@@ -28,30 +32,42 @@ import {
 const svgUri = (svg: string) =>
     `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace(/^<\?xml[^>]*\?>\s*/, ''))}`;
 
-/** One chart thumbnail. `tone` colours the border; `caption` sits underneath. */
+/**
+ * One chart thumbnail, filling the height of its row. `tone` colours the
+ * border; `caption` sits underneath.
+ */
 const ChartCard: FC<{
     chart: TraceChart;
     width: number | string;
-    height: number;
     tone?: string;
     dim?: boolean;
     caption?: string;
     onClick?: () => void;
-}> = ({ chart, width, height, tone, dim, caption, onClick }) => (
+}> = ({ chart, width, tone, dim, caption, onClick }) => (
     <Box component={onClick ? 'button' : 'div'} onClick={onClick} type={onClick ? 'button' : undefined}
         sx={{
-            width, p: 0.75, background: '#fff', textAlign: 'left', flexShrink: 0,
+            width, height: '100%', minWidth: 0, minHeight: 0, p: 0.75, background: '#fff', textAlign: 'left',
+            display: 'flex', flexDirection: 'column',
             border: `2px solid ${tone ?? borderColor.view}`, borderRadius: radius.sm,
             opacity: dim ? 0.6 : 1, cursor: onClick ? 'pointer' : 'default',
             transition: 'border-color .12s, box-shadow .12s',
             ...(onClick ? { '&:hover': { borderColor: 'primary.main' } } : {}),
             ...(tone ? { boxShadow: `0 0 0 3px ${alpha(tone, 0.16)}` } : {}),
         }}>
+        {/* The title heads the card, centred over its chart. Two clamped lines
+            with a fixed block height, so a wrapped title on one candidate does
+            not shrink its chart against the other two. The full text stays
+            available on hover. */}
+        <Typography title={chart.title} sx={{
+            flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: 'text.primary', textAlign: 'center',
+            lineHeight: 1.25, minHeight: '2.5em', mb: 0.5,
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>{chart.title}</Typography>
         <img src={svgUri(chart.svg)} alt="" draggable={false}
-            style={{ width: '100%', height, objectFit: 'contain', display: 'block' }} />
-        <Typography noWrap sx={{ fontSize: 10.5, color: 'text.secondary', mt: 0.25 }}>{chart.title}</Typography>
+            style={{ flex: '1 1 auto', minHeight: 0, minWidth: 0, width: '100%', objectFit: 'contain', display: 'block' }} />
         {caption && (
-            <Typography sx={{ fontSize: 10, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+            <Typography sx={{ flexShrink: 0, fontSize: 9.5, color: 'text.disabled', textAlign: 'center', mt: 0.25,
+                              textTransform: 'uppercase', letterSpacing: '.06em' }}>
                 {caption}
             </Typography>
         )}
@@ -73,7 +89,11 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
     const [index, setIndex] = useState(0);
     const [picked, setPicked] = useState<string | null>(null);
     const [revealed, setRevealed] = useState(false);
-    const [rationale, setRationale] = useState('');
+    // Confidence in the PICK, so it is asked before the reveal and frozen by
+    // it — the rater goes read-only the moment the true chart is outlined,
+    // otherwise the rating could be revised once the answer is on screen.
+    const [confidence, setConfidence] = useState(CONFIDENCE_DEFAULT);
+    const [confidenceSet, setConfidenceSet] = useState(false);
     const [responses, setResponses] = useState<ProvenanceResponse[]>([]);
 
     const item = material.items[index];
@@ -104,10 +124,12 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
             pickedChartId: chosen.chartId,
             pickedNum: chosen.num,
             correct: chosen.chartId === answer.chartId,
+            touchesReport: item.touchesReport,
             optionNums: item.options.map(o => o.num),
-            rationale: rationale.trim(),
             actualPrompt: answer.actualPrompt,
             promptSource: answer.promptSource,
+            confidence,
+            confidenceSet,
             seconds: Math.round((Date.now() - itemStartRef.current) / 1000),
         }];
         setResponses(next);
@@ -116,12 +138,12 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
             return;
         }
         setIndex(i => i + 1);
-        setPicked(null); setRevealed(false); setRationale('');
+        setPicked(null); setRevealed(false);
+        setConfidence(CONFIDENCE_DEFAULT); setConfidenceSet(false);
         itemStartRef.current = Date.now();
     };
 
     const correct = revealed && picked === answer.chartId;
-    const thumbW = wide ? 220 : '100%';
 
     /** Border colour for an option: neutral while choosing, verdict once revealed. */
     const optionTone = (chartId: string): string | undefined => {
@@ -131,85 +153,79 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
     };
 
     return (
-        <Box sx={{ p: 1.5 }}>
-            <Typography sx={{ fontSize: 11, color: 'text.disabled', mb: 0.75 }}>
+        <Box sx={{ p: 1.5, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column',
+                   overflow: 'hidden' }}>
+            <Typography sx={{ flexShrink: 0, fontSize: 11, color: 'text.disabled', mb: 0.75 }}>
                 {t('quiz.provProgress', { n: index + 1, total: material.items.length,
                     defaultValue: `Move ${index + 1} of ${material.items.length}` })}
             </Typography>
 
-            {/* ── context: the chart before, then the one the move starts from ── */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
+            {/* ── context: the chart before, then the one the move starts from.
+                   Just the two charts — the question line below already says a
+                   next chart is being asked for. ── */}
+            <Box sx={{ flex: '4 1 0', minHeight: 0, display: 'flex', alignItems: 'stretch', gap: 1, mb: 1.5 }}>
                 {item.previous && (
                     <>
-                        <ChartCard chart={item.previous} width={wide ? 180 : '100%'} height={100} dim
+                        <ChartCard chart={item.previous} width={wide ? '40%' : '48%'} dim
                             caption={t('quiz.provBefore', { defaultValue: 'before that' })} />
-                        <ArrowForwardIcon sx={{ fontSize: 16, color: 'text.disabled' }} />
+                        <ArrowForwardIcon sx={{ flexShrink: 0, alignSelf: 'center', fontSize: 16, color: 'text.disabled' }} />
                     </>
                 )}
-                <ChartCard chart={item.from} width={wide ? 220 : '100%'} height={120}
+                <ChartCard chart={item.from} width={wide ? '46%' : '48%'}
                     tone={theme.palette.primary.main}
                     caption={t('quiz.provHere', { defaultValue: 'you were here' })} />
-                <ArrowForwardIcon sx={{ fontSize: 16, color: 'text.disabled' }} />
-                <Box sx={{ width: 60, height: 60, borderRadius: radius.sm, border: `2px dashed ${borderColor.view}`,
-                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                           fontSize: 20, color: theme.palette.text.disabled }}>?</Box>
             </Box>
 
-            <Typography sx={{ fontSize: 12.5, fontWeight: 600, mb: 0.75 }}>
+            <Typography sx={{ flexShrink: 0, fontSize: 15, fontWeight: 600, mb: 0.75 }}>
                 {t('quiz.provPickPrompt', { defaultValue: 'Which chart did you make next?' })}
             </Typography>
 
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
+            {/* A 3-column grid, not a wrapped row: the three candidates must
+                share ONE row at any window width. They take the larger share of
+                the height — they are what the participant compares. */}
+            <Box sx={{ flex: '5 1 0', minHeight: 0, display: 'grid',
+                       gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                       gridTemplateRows: 'minmax(0, 1fr)', gap: 1, mb: 1 }}>
                 {item.options.map(opt => (
-                    <ChartCard key={opt.chartId} chart={opt} width={thumbW} height={130}
+                    <ChartCard key={opt.chartId} chart={opt} width="100%"
                         tone={optionTone(opt.chartId)}
                         onClick={revealed ? undefined : () => setPicked(opt.chartId)} />
                 ))}
             </Box>
 
-            {!revealed ? (
-                <Button size="small" variant="contained" disabled={!picked}
-                    onClick={() => setRevealed(true)}
-                    sx={{ fontSize: 12, textTransform: 'none' }}>
-                    {t('quiz.provConfirm', { defaultValue: 'That is the one' })}
-                </Button>
-            ) : (
-                <>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-                        {correct
-                            ? <CheckCircleOutlineIcon sx={{ fontSize: 16, color: 'success.main' }} />
-                            : <HighlightOffIcon sx={{ fontSize: 16, color: 'error.main' }} />}
-                        <Typography sx={{ fontSize: 11.5, color: correct ? 'success.main' : 'error.main' }}>
-                            {correct
-                                ? t('quiz.provRight', { defaultValue: 'Yes — that is the chart you made next.' })
-                                : t('quiz.provWrong', { defaultValue: 'Not that one. The chart you actually made next is outlined in green.' })}
-                        </Typography>
-                    </Box>
-                    {/* Part 2 always asks about the REVEALED chart, so the rationale
-                        stays readable even when the pick was wrong. */}
-                    <TextField
-                        fullWidth multiline minRows={2} size="small" autoFocus
-                        value={rationale}
-                        onChange={e => setRationale(e.target.value)}
-                        label={t('quiz.provRationale', { defaultValue: 'Why did you move from one to the other?' })}
-                        sx={{ mb: 1, '& .MuiInputBase-root': { fontSize: 12.5 }, '& .MuiInputLabel-root': { fontSize: 12.5 } }}
-                    />
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Button size="small" variant="contained" disabled={!rationale.trim()} onClick={handleNext}
-                            sx={{ fontSize: 12, textTransform: 'none' }}>
-                            {index + 1 >= material.items.length
-                                ? t('quiz.provFinish', { defaultValue: 'Done' })
-                                : t('quiz.provNext', { defaultValue: 'Next move' })}
+            {/* The verdict keeps its row whether or not it says anything, so
+                revealing an answer never moves the rating or the button. */}
+            <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5, minHeight: 22, mb: 0.5 }}>
+                {revealed && (correct
+                    ? <CheckCircleOutlineIcon sx={{ fontSize: 16, color: 'success.main' }} />
+                    : <HighlightOffIcon sx={{ fontSize: 16, color: 'error.main' }} />)}
+                <Typography sx={{ fontSize: 11.5, color: correct ? 'success.main' : 'error.main' }}>
+                    {revealed
+                        ? (correct
+                            ? t('quiz.provRight', { defaultValue: 'Yes — that is the chart you made next.' })
+                            : t('quiz.provWrong', { defaultValue: 'Not that one. The chart you actually made next is outlined in green.' }))
+                        : ''}
+                </Typography>
+            </Box>
+
+            {/* Below the candidates: the rating is about the pick, so it shares
+                the row with the button that commits it, and confirming freezes
+                it. Once revealed, the same button moves on. */}
+            <Box sx={{ flexShrink: 0 }}>
+                <ConfidenceRater
+                    value={confidence}
+                    onChange={setConfidence}
+                    onTouch={() => setConfidenceSet(true)}
+                    disabled={revealed}
+                    action={
+                        <Button variant="contained" disabled={!picked}
+                            onClick={revealed ? handleNext : () => setRevealed(true)}
+                            sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
+                            {t('quiz.confirm', { defaultValue: 'Confirm' })}
                         </Button>
-                        {!rationale.trim() && (
-                            <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>
-                                {t('quiz.provRationaleHint', { defaultValue:
-                                    'A sentence from memory is plenty — say what made you take this step.' })}
-                            </Typography>
-                        )}
-                    </Box>
-                </>
-            )}
+                    }
+                />
+            </Box>
         </Box>
     );
 };

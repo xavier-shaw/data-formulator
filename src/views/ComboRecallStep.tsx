@@ -34,7 +34,7 @@ import { ComboGroup, RecallMaterial, loose } from '../app/fieldRecall';
 import { RecallDataPreview } from './RecallDataPreview';
 // Part 2 offers the same buttons as part 1 over the same palette, so it takes
 // part 1's own button style rather than a lookalike.
-import { attributeChipSx } from './FieldRecallStep';
+import { attributeChipSx, paletteGridSx } from './FieldRecallStep';
 import { borderColor, radius } from '../app/tokens';
 
 const mono = { fontFamily: 'ui-monospace, Menlo, monospace' };
@@ -122,13 +122,10 @@ export const ComboRecallStep: FC<ComboRecallStepProps> = ({
 
     return (
         <Box sx={{ p: 1.5 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 600 }}>
+            {/* Just the question — the how-to lives on the quiz's intro tab,
+                and the active card's own hints carry the mechanics. */}
+            <Typography sx={{ fontSize: 18, fontWeight: 700, mb: 2 }}>
                 {t('quiz.comboTitle', { defaultValue: 'Which attributes did you look at together?' })}
-            </Typography>
-            <Typography sx={{ fontSize: 12.5, color: 'text.secondary', maxWidth: 820, mb: 1.5 }}>
-                {t('quiz.comboIntro', {
-                    defaultValue: 'Make one group for each combination of attributes you remember charting together. Click a combination to make it the one you are filling, then click the attributes that went into it. The attributes you named a moment ago come first.',
-                })}
             </Typography>
 
             {/* The same data, in the same grid as part 1. */}
@@ -139,7 +136,7 @@ export const ComboRecallStep: FC<ComboRecallStepProps> = ({
             />
 
             {/* The answer: one card per combination, the active one outlined. */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: wide ? '1fr 1fr' : '1fr', gap: 1, mb: 1.5 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: wide ? '1fr 1fr' : '1fr', gap: 1.75, mt: 2, mb: 2 }}>
                 {groups.map((group, i) => {
                     const isActive = i === activeIndex;
                     return (
@@ -151,7 +148,7 @@ export const ComboRecallStep: FC<ComboRecallStepProps> = ({
                                   transition: 'border-color .12s, box-shadow .12s' }}
                         >
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                                <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: isActive ? 'primary.main' : 'text.secondary', flex: 1 }}>
+                                <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: isActive ? 'primary.main' : 'text.secondary', flex: 1 }}>
                                     {t('quiz.comboGroupN', { n: i + 1, defaultValue: `Combination ${i + 1}` })}
                                     {isActive && (
                                         <Typography component="span" sx={{ fontSize: 10.5, color: 'text.disabled', ml: 0.75, fontWeight: 400 }}>
@@ -199,31 +196,33 @@ export const ComboRecallStep: FC<ComboRecallStepProps> = ({
 
             {/* The palette: their own attributes first, then the rest. */}
             {mine.length > 0 && (
-                <Box sx={{ mt: 1.5 }}>
-                    <Typography sx={{ fontSize: 11, color: accent, mb: 0.5 }}>
+                <Box sx={{ mt: 2.5 }}>
+                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: accent, mb: 1 }}>
                         {t('quiz.comboMine', { count: mine.length, defaultValue: `The attributes you named (${mine.length})` })}
                     </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                    {/* The same grid as part 2's palette. */}
+                    <Box sx={paletteGridSx(wide)}>
                         {mine.map(name => paletteChip(name, true))}
                     </Box>
                 </Box>
             )}
             {rest.length > 0 && (
-                <Box sx={{ mt: 1.5 }}>
-                    <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.5 }}>
+                <Box sx={{ mt: 2.5 }}>
+                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: 'text.secondary', mb: 1 }}>
                         {mine.length > 0
                             ? t('quiz.comboRest', { defaultValue: 'The rest of the columns' })
                             : t('quiz.comboAll', { defaultValue: 'The columns of your data' })}
                     </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                    <Box sx={paletteGridSx(wide)}>
                         {rest.map(name => paletteChip(name, false))}
                     </Box>
                 </Box>
             )}
 
             <Box sx={{ mt: 2.5 }}>
-                <Button size="small" variant="contained" onClick={onContinue} sx={{ fontSize: 12, textTransform: 'none' }}>
-                    {t('quiz.comboContinue', { defaultValue: 'Done — continue to the charts' })}
+                <Button variant="contained" onClick={onContinue}
+                    sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
+                    {t('quiz.confirm', { defaultValue: 'Confirm' })}
                 </Button>
             </Box>
         </Box>

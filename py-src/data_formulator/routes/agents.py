@@ -383,8 +383,7 @@ def analyst_streaming():
     # markdown file in analyst/modes/ (default.md / executor.md / analyst.md /
     # analyst_guided.md); the server loads it so the experiment stays reproducible
     # and tamper-resistant. A mode may override max_iterations (Executor 5,
-    # Analyst-guided 7 — both budget a describe_chart caption per chart —
-    # Analyst 8; Default leaves the request's value).
+    # Analyst-guided 7, Analyst 8; Default leaves the request's value).
     # Default = no profile (the untouched control).
     prompt_profile = None
     if agent_mode != "mini" and analysis_mode in ("executor", "analyst", "analyst_guided"):

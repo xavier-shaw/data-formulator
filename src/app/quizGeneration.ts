@@ -4,12 +4,19 @@
 /**
  * quizGeneration — build a chart-recognition quiz for one session, in the browser.
  *
- * Asks: "which of these four charts did you actually make?" The three wrong
- * answers are generated look-alikes (see src/lib/quiz-distractors), rendered
- * through the app's own Flint chart pipeline so they sit visually alongside the
- * participant's real charts rather than looking like something else entirely.
+ * Asks: "which of these charts did you actually make?" The wrong answers are
+ * generated look-alikes (see src/lib/quiz-distractors), arranged as an option
+ * matrix of up to 3×3: VISUAL perturbations (same data, different
+ * representation), DATA perturbations (same representation, different
+ * message), and COMBINED perturbations (both changed) in the cross cells.
+ * All are rendered through the app's own Flint chart pipeline so they sit
+ * visually alongside the participant's real charts rather than looking like
+ * something else entirely.
  *
- * Charts are ranked by how long the participant actually looked at them
+ * Chart selection is stratified by report membership: half of the questions
+ * ask about charts the participant put in their findings report
+ * (`state.findingsChartIds`), half about intermediate charts. Within each
+ * half, charts are ranked by how long the participant actually looked at them
  * (`state.chartUsage.focusMs`), so the quiz asks about the work they engaged
  * with rather than every chart they happened to produce.
  *
@@ -24,6 +31,7 @@ import {
 import { renderVegaLiteToSvg } from './vegaRender';
 import { loadWorkspace } from './workspaceService';
 import { readRecallMaterial, ComboAnswer, RecallAnswer, RecallMaterial } from './fieldRecall';
+import { loadModeratorConfig, QuizModeratorConfig } from './quizModeratorConfig';
 
 export interface GeneratedQuiz {
     sessionId: string;
@@ -36,11 +44,13 @@ export interface GeneratedQuiz {
      * did not ask about. Author mode lists these, since inspecting a chart's
      * look-alikes is worthwhile even when the quiz refused to use them.
      */
-    ranked: { chartId: string; title: string; focusMs: number }[];
+    ranked: { chartId: string; title: string; focusMs: number; inReport: boolean }[];
     /** how many charts the session offered before selection */
     chartsConsidered: number;
     /** invariant violations; non-empty means something is wrong with the set */
     problems: string[];
+    /** true when a moderator config drove the chart selection */
+    moderated: boolean;
 }
 
 export interface GenerateQuizArgs {
@@ -55,6 +65,12 @@ export interface GenerateQuizArgs {
     topN?: number;
     seed?: number;
     onProgress?: (done: number, total: number, label: string) => void;
+    /**
+     * The moderator config to apply. Undefined = read the stored config for
+     * this session (the participant path); null = ignore any stored config
+     * (the moderator page passes its own draft explicitly).
+     */
+    config?: QuizModeratorConfig | null;
 }
 
 /** Let the browser paint between charts so a progress bar actually moves. */
@@ -129,12 +145,18 @@ const renderOrNull = (vlSpec: any, id: string) =>
     });
 
 export async function generateQuizForSession(args: GenerateQuizArgs): Promise<GeneratedQuiz> {
-    const { sessionId, sessionName, liveState, topN = 12, seed = DEFAULT_SEED, onProgress } = args;
+    const { sessionId, sessionName, liveState, topN = 6, seed = DEFAULT_SEED, onProgress } = args;
 
     const session = await resolveSession(sessionId, liveState);
     if (session.charts.length === 0) {
         throw new Error('This session has no charts to ask about.');
     }
+
+    // The moderator's choices, when there are any: an explicit chart list and
+    // preferred perturbations. Undefined config means "look it up"; null means
+    // the caller wants the automatic behavior regardless.
+    const config = args.config === undefined ? loadModeratorConfig(sessionId) : args.config;
+    const recognition = config?.recognition;
 
     const { items, skipped, ranked } = await buildQuizItems({
         session,
@@ -143,6 +165,8 @@ export async function generateQuizForSession(args: GenerateQuizArgs): Promise<Ge
         render: renderOrNull,
         onProgress,
         yieldToUi,
+        chartOrder: recognition?.chartIds,
+        preferredLures: recognition?.preferred,
     });
 
     if (skipped.length) {
@@ -167,6 +191,7 @@ export async function generateQuizForSession(args: GenerateQuizArgs): Promise<Ge
         // vega and node vl2svg measure text differently), so the meaningful
         // check here is the invariants, not a count match.
         problems: verifyQuizItems(items),
+        moderated: !!(recognition?.chartIds || recognition?.preferred),
     };
 }
 
@@ -180,8 +205,8 @@ export interface AuthorViewArgs {
 }
 
 /**
- * Build the author view for a single chart: each axis's look-alikes (form,
- * content, combined) with the operations behind them. One chart at a time, on
+ * Build the author view for a single chart: each axis's look-alikes (visual,
+ * data) with the operations behind them. One chart at a time, on
  * demand — rendering a whole session's lures at once is hundreds of charts and
  * would stall the panel.
  */
@@ -196,38 +221,47 @@ export async function authorViewForChart(args: AuthorViewArgs): Promise<Authored
 // ── answer recording ─────────────────────────────────────────────────────
 
 /**
- * One answer, recorded across both steps of a question.
- *
- * Each chart is asked twice: first with all text stripped from the options
- * (axis labels, tick values, legend text), then again with the text shown. That
- * separates two different memories — the shape of a chart, and what was written
- * on it — and `changedAfterText` says whether reading the labels overturned the
- * judgement the shape alone produced.
+ * One answer. A question is one step: the option matrix is shown with its
+ * text, the participant picks one, and the pick is scored.
  */
 export interface QuizAnswer {
     n: number;
     chartId: string;
     title: string;
     chartType: string;
+    /** true when the asked-about chart was in the participant's findings report */
+    inReport: boolean;
 
-    /** step 1: chosen while all text was hidden */
-    blindPickedId: string;
-    blindCorrect: boolean;
-
-    /** step 2 (final): chosen with the text visible */
     correct: boolean;
     pickedId: string;
-    /** did seeing the text change the answer? */
-    changedAfterText: boolean;
 
-    /** set only on a final miss: which axis produced the chosen look-alike (form / content / combined) */
+    /** set only on a miss: which axis produced the chosen look-alike (visual / data / combined) */
     method?: string;
-    /** the specific operation behind it, e.g. 'mark', 'sort-value', 'perturb-invert' */
+    /** the specific operation behind it, e.g. 'mark', 'reassign-reverse', 'mark+attenuate' */
     op?: string;
     label?: string;
+    /** data and combined lures: the message dimension the lure attacked (direction / location / existence / strength) */
+    dim?: string;
+    /** visual and combined lures: how far the representation moved (near / mid / far) */
+    band?: string;
+    /** where the pick sat in the option matrix; the original is (0,0) */
+    cell?: { v: number; d: number };
     /** the misrecall distances: how far the chosen look-alike sat from the real chart */
     specDist?: number;
     dataDist?: number;
+
+    /** 0-100, very unsure → very sure, given before the answer was revealed */
+    confidence: number;
+    /** false = the rater was left at its midpoint default, never touched */
+    confidenceSet: boolean;
+}
+
+/** Part 1: the questions the participant would ask next. Free text, never
+ *  scored — read offline against the analysis the session really produced. */
+export interface NextQuestionsAnswer {
+    /** exactly what was typed, in slot order; an empty slot stays empty */
+    questions: string[];
+    seconds: number;
 }
 
 export interface QuizResult {
@@ -238,10 +272,12 @@ export interface QuizResult {
     total: number;
     correct: number;
     answers: QuizAnswer[];
-    /** part 1: the attributes named, and how they scored (absent if skipped) */
+    /** part 2: the attributes named, and how they scored (absent if skipped) */
     recall?: RecallAnswer;
-    /** part 2: the combinations they were grouped into (absent if skipped) */
+    /** part 3: the combinations they were grouped into (absent if skipped) */
     combos?: ComboAnswer;
+    /** part 1: the three questions they would ask next (absent if skipped) */
+    nextQuestions?: NextQuestionsAnswer;
 }
 
 export function buildQuizResult(

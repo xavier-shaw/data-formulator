@@ -4,25 +4,33 @@
 /**
  * quiz-distractors/generators.ts — look-alike generation on two axes.
  *
- * A chart leaves two separable memories, and each lure targets exactly one
- * (or deliberately both):
+ * This module implements docs/quiz-distractor-framework.md (design v6). A
+ * chart leaves two separable memories, and each lure targets one — or, in a
+ * combined lure, both at once:
  *
- *  FORM      how it was drawn — chart/mark type, orientation, color.
- *            The data is untouched: same rows, same sort, same aggregation.
+ *  VISUAL    keep the underlying data; change the visual representation.
+ *            The finding stays the same. The lure tests whether the
+ *            participant remembers the TOOL they used to get the finding.
  *
- *  CONTENT   what the data said — sort order, scale, aggregation, filtering,
- *            and value perturbation. The drawing is untouched: same chart
- *            type, same field-to-channel mapping, same colors.
+ *  DATA      keep the visual representation; change what the data says.
+ *            The finding becomes different. The lure tests whether the
+ *            participant remembers the FINDING itself. Every data lure
+ *            attacks one message dimension: direction, location, existence,
+ *            or strength (see messageOps.ts).
  *
- *  COMBINED  form edit A composed with content edit B — and specifically the
- *            SAME A and B that the item's other two lures carry, so a quiz
- *            item is a clean 2×2: original, A, B, A+B.
+ *  COMBINED  a visual lure's drawing over a data lure's rows. It fills the
+ *            cross cells of the option matrix (see select.ts): a participant
+ *            who picks one encoded neither the tool nor the finding.
+ *
+ * The transformations are CURATED per chart type (curated.ts): each type
+ * declares its typical mark transitions and its message operators, as the v3
+ * design did. The machinery below stays as a backstop: plausibility gates,
+ * the same-fields check, the compile probe, and the purity contract prune a
+ * curated pair that does not fit this chart's data.
  *
  * Purity is enforced, not just intended: `enforcePurity` drops (with a console
- * warning) any form candidate whose rows changed and any content candidate
- * whose chart type or field mapping changed. That keeps the quiz's analysis
- * honest — when a participant picks a form lure, the only thing it differed
- * in was form.
+ * warning) any visual candidate whose rows changed, any data candidate whose
+ * drawing changed, and any combined candidate that failed to change both.
  *
  * Every candidate compiles through the app's own assembler, so lures are
  * visually in-distribution with the charts participants actually saw.
@@ -32,32 +40,39 @@ import {
     ChartLevelSpec, FieldMeta, SessionChart, SessionData,
     cloneSpec, compiles, isQuantitative, specSignature,
 } from './extract';
-import { SpecEdit, EDIT_COSTS } from './distance';
+import { SpecEdit, EDIT_COSTS, markTransitionCost } from './distance';
+import {
+    DataDim, MESSAGE_OPS, FLOORS, resolveRoles, messageMetrics,
+    sortedAxis, preserveSortedProfile, takeawaySignature,
+} from './messageOps';
 import { vlAdaptChart } from '../agents-chart';
+import { curatedFor } from './curated';
 
-export type Method = 'form' | 'content' | 'combined';
+export type Method = 'visual' | 'data' | 'combined';
+export type VisualBand = 'near' | 'mid' | 'far';
 
 export interface DistractorCandidate {
     method: Method;
-    /** the specific operation, e.g. 'mark', 'sort-value', 'perturb-invert' */
+    /** the specific operation: 'mark' on the visual axis, the operator id on the data axis */
     op: string;
     label: string;
     rationale: string;
     spec: ChartLevelSpec;
     rows: any[];
     metadata: Record<string, FieldMeta>;
+    /** data lures: the message dimension the operator attacks */
+    dim?: DataDim;
+    /** visual lures: how far the representation moved (framework band) */
+    band?: VisualBand;
+    /** data lures: a short story signature — two lures with the same one tell the same story */
+    signature?: string;
     /** set when rows differ from the original chart's rows */
     dataEditNote?: string;
     /** flags a lure that needs special quiz phrasing */
     caveat?: string;
-    /** which form edit produced it (set on form and combined lures) */
-    formIndex?: number;
-    /** which content edit produced it (set on content and combined lures) */
-    contentIndex?: number;
     /**
      * Edits a spec diff cannot recover (see distance.ts mergeEdits).
-     * Without these, order-only lures score (0, 0) — indistinguishable from
-     * the original in the analysis.
+     * Without these, config-carried lures score (0, 0) on the spec axis.
      */
     declaredEdits?: SpecEdit[];
 }
@@ -98,587 +113,388 @@ function semanticTypeMap(metadata: Record<string, FieldMeta>): Record<string, st
     return Object.fromEntries(Object.entries(metadata).map(([f, m]) => [f, m.semanticType]));
 }
 
-/** find the channel a field sits on in a (possibly form-edited) spec */
-function channelOf(spec: ChartLevelSpec, field: string | undefined): string | undefined {
-    if (!field) return undefined;
-    return Object.entries(spec.encodings).find(([, e]) => e.field === field)?.[0];
-}
-
-/**
- * Channels a sort directive may name. `sortBy` compiles to Vega-Lite's channel
- * shorthand ("y" / "-y"), which only exists for these; naming any other channel
- * makes VL log `sort error > <channel>` and ignore the sort — which a composed
- * lure can otherwise reach, since a mark change may move the measure to
- * `column` or `size`.
- */
-const SORTABLE_CHANNELS = new Set(['x', 'y', 'color']);
-
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
 
+// ═════════════════════════════════════════════════════════════════════════
+// Visual perturbation — the admissible-target tables
+// ═════════════════════════════════════════════════════════════════════════
+
 /**
- * Reorder an edit list so the operations take turns, keeping each operation's
- * own order. The composition grid is capped, and a cap applied to a list
- * grouped by operation would amputate whole operations — a bar chart offers
- * eight mark targets before it offers transpose or a recolor, so a cap of eight
- * would leave every form lure in the study a mark swap.
+ * Gate predicates, evaluated against the SOURCE chart's data semantics (the
+ * framework's source-anchored rule). A gate that fails prunes the target.
  */
-function interleaveByOp<T extends { op: string }>(edits: T[]): T[] {
-    const queues = new Map<string, T[]>();
-    for (const e of edits) {
-        if (!queues.has(e.op)) queues.set(e.op, []);
-        queues.get(e.op)!.push(e);
-    }
-    const out: T[] = [];
-    const lists = [...queues.values()];
-    for (let i = 0; out.length < edits.length; i++) {
-        for (const list of lists) if (i < list.length) out.push(list[i]);
-    }
-    return out;
+type GateId = 'nonNeg' | 'maxCats8' | 'maxCats6' | 'multiSeries';
+
+function categoryValues(chart: SessionChart): any[] {
+    const { category } = chartRoles(chart);
+    return category ? uniq(chart.rows.map(r => r[category])) : [];
 }
 
-// ═════════════════════════════════════════════════════════════════════════
-// Atomic edits — each returns undefined when it does not apply
-// ═════════════════════════════════════════════════════════════════════════
-
-/** A form edit rewrites the spec; the rows are never touched. */
-interface FormEdit {
-    op: string;
-    label: string;
-    rationale: string;
-    apply: (spec: ChartLevelSpec) => ChartLevelSpec | undefined;
-    declaredEdits?: SpecEdit[];
+/** Does this field carry its own order (dates, years, binned ranges)? */
+function fieldIsOrdered(field: string, chart: SessionChart): boolean {
+    if (chart.metadata[field]?.type !== 'string') return true;
+    const vals = chart.rows.map(r => String(r[field]));
+    return vals.length > 0 && vals.every(v => /^\s*[-+]?\d/.test(v));
 }
 
 /**
- * A content edit changes what the data says; the drawing stays. It receives
- * the spec it must preserve (which, for combined lures, is already
- * form-edited) and locates its channels by FIELD NAME, not by position, so it
- * composes correctly after a transpose or mark change.
+ * Gates on the DATA. These read the source chart only, so they are the
+ * framework's source-anchored gates.
  */
-interface ContentEdit {
-    op: string;
-    label: string;
-    rationale: string;
-    apply: (spec: ChartLevelSpec, rows: any[]) => {
-        spec: ChartLevelSpec; rows: any[];
-        dataEditNote?: string; declaredEdits?: SpecEdit[];
-    } | undefined;
-}
-
-// ── form edits ───────────────────────────────────────────────────────────
-
-/** mark targets per band, filtered by compile-probe later */
-const NEAR_MARKS: Record<string, string[]> = {
-    'Bar Chart': ['Lollipop Chart', 'Bar Table'],
-    'Bar Table': ['Bar Chart', 'Lollipop Chart'],
-    'Grouped Bar Chart': ['Stacked Bar Chart', 'Bar Chart'],
-    'Line Chart': ['Area Chart'],
-};
-const MID_MARKS = ['Line Chart', 'Scatter Plot', 'Area Chart', 'Bar Chart'];
-const FAR_MARKS = ['Pie Chart', 'Heatmap', 'Rose Chart'];
-
-function formEdits(chart: SessionChart): FormEdit[] {
-    const edits: FormEdit[] = [];
-    const semTypes = semanticTypeMap(chart.metadata);
-
-    const markEdit = (target: string, band: string): FormEdit => ({
-        op: 'mark',
-        label: `mark → ${target}`,
-        rationale: `Same data, same values — redrawn as a ${target} (${band} mark swap). Do they remember HOW it was drawn?`,
-        apply: (spec) => {
-            if (spec.chartType === target) return undefined;
-            try {
-                const adapted = vlAdaptChart(spec.chartType, target, encFieldMap(spec), chart.rows, semTypes);
-                if (Object.keys(adapted).length === 0) return undefined;
-                return fromFieldMap(target, adapted, spec.config);
-            } catch { return undefined; }
+const GATES: Record<GateId, { test: (chart: SessionChart) => boolean; text: string }> = {
+    nonNeg: {
+        test: (chart) => {
+            const { measure } = chartRoles(chart);
+            if (!measure) return false;
+            return chart.rows.every(r => Number(r[measure]) >= 0 || !Number.isFinite(Number(r[measure])));
         },
-    });
+        text: 'the values must not be negative (the target chart needs a meaningful sum or baseline)',
+    },
+    maxCats8: {
+        test: (chart) => categoryValues(chart).length > 0 && categoryValues(chart).length <= 8,
+        text: 'a radial chart with more than 8 sectors is a pile of overlapping labels',
+    },
+    // No lower bound, unlike the radial gate above. A radial chart needs a
+    // category to divide into sectors, but an overlay does not: a chart with
+    // no category simply draws one shape. Requiring one refused the
+    // Histogram → Density Plot pair, which is the doc's canonical near pair,
+    // while leaving Density Plot → Histogram admissible — an asymmetry that
+    // only showed up in the gallery counts.
+    maxCats6: {
+        test: (chart) => categoryValues(chart).length <= 6,
+        text: 'an overlay of more than 6 shapes is not readable',
+    },
+    multiSeries: {
+        test: (chart) => {
+            const { colorField, category } = chartRoles(chart);
+            return !!colorField && colorField !== category
+                && uniq(chart.rows.map(r => r[colorField])).length >= 2;
+        },
+        text: 'the target chart needs more than one series',
+    },
+};
 
-    for (const t of NEAR_MARKS[chart.spec.chartType] ?? []) edits.push(markEdit(t, 'near-family'));
-    for (const t of MID_MARKS.filter(t => t !== chart.spec.chartType)) edits.push(markEdit(t, 'cross-family'));
-    for (const t of FAR_MARKS.filter(t => t !== chart.spec.chartType)) edits.push(markEdit(t, 'remote-family'));
+/**
+ * Gates on the TARGET'S OWN X AXIS, checked after the adaptation.
+ *
+ * These cannot be source-anchored, and that is not a violation of the
+ * framework's rule — it is the same rule read correctly. `orderedCat` asks
+ * "does the chart this lure produces draw a trend over an unordered domain?",
+ * and only the adapted encoding says which field the target puts on x. A Bar
+ * Table carries its measure on x and its labels on y, so a source-anchored
+ * reading passed a Regression whose adapted x was the airport name.
+ */
+type AxisGateId = 'orderedX' | 'quantX';
 
-    // Transpose is meaningless for a Bar Table: its two channels are a label
-    // column and a bar column, not interchangeable axes.
-    if (chart.spec.chartType !== 'Bar Table') {
-        edits.push({
-            op: 'transpose',
-            label: 'transposed',
-            rationale: 'Axes swapped — vertical vs horizontal orientation memory.',
-            apply: (spec) => {
-                if (!spec.encodings.x?.field || !spec.encodings.y?.field) return undefined;
-                const s = cloneSpec(spec);
-                const tmp = s.encodings.x; s.encodings.x = s.encodings.y; s.encodings.y = tmp;
-                return s;
-            },
+const AXIS_GATES: Record<AxisGateId, { test: (field: string, chart: SessionChart) => boolean; text: string }> = {
+    orderedX: {
+        test: (field, chart) => fieldIsOrdered(field, chart),
+        text: 'a trend over an unordered axis shows a rise that is not in the data',
+    },
+    quantX: {
+        test: (field, chart) => isQuantitative(field, chart.metadata),
+        text: 'a fitted line needs a quantitative x axis, or it invents a trend',
+    },
+};
+
+/**
+ * Gates that a TARGET puts on the source chart. These protect plausibility,
+ * not correctness: a participant who rejects a lure because it cannot be true
+ * has used no memory, and the item then measures nothing.
+ */
+const TARGET_GATES: Record<string, GateId[]> = {
+    // A radial chart divides a whole, so the parts must be positive, and its
+    // sectors must be few enough to label.
+    'Pie Chart': ['nonNeg', 'maxCats8'],
+    'Rose Chart': ['nonNeg', 'maxCats8'],
+    'Radar Chart': ['nonNeg', 'maxCats8'],
+    'Area Chart': ['nonNeg'],
+    'Streamgraph': ['nonNeg'],
+    'Stacked Bar Chart': ['nonNeg'],
+    'Density Plot': ['maxCats6'],
+};
+
+/** Gates a target puts on whichever field it lands on its own x channel. */
+const TARGET_AXIS_GATES: Record<string, AxisGateId[]> = {
+    'Line Chart': ['orderedX'],
+    'Area Chart': ['orderedX'],
+    'Streamgraph': ['orderedX'],
+    'Bump Chart': ['orderedX'],
+    'Regression': ['quantX'],
+};
+
+/** The distinct fields a spec puts on a channel. */
+function fieldSet(spec: ChartLevelSpec): Set<string> {
+    return new Set(Object.values(spec.encodings).map(e => e.field).filter(Boolean));
+}
+
+const sameSet = (a: Set<string>, b: Set<string>) =>
+    a.size === b.size && [...a].every(v => b.has(v));
+
+/**
+ * How far the representation moved, from the shared edit-cost model rather
+ * than a hand-written band. `markTransitionCost` prices a transition inside a
+ * mark family below one between adjacent families, and that below a remote
+ * family — the GraphScape ordering `distance.ts` already uses to score lures.
+ */
+function bandOf(source: string, target: string): VisualBand {
+    const cost = markTransitionCost(source, target);
+    if (cost <= EDIT_COSTS.MARK_NEAR) return 'near';
+    if (cost <= EDIT_COSTS.MARK_MID) return 'mid';
+    return 'far';
+}
+
+/**
+ * Every visual candidate for one chart, in the CURATED preference order for
+ * its chart type (curated.ts). The first entries are the typical near
+ * transitions; the later entries move further away.
+ *
+ * A visual lure is a MARK RETARGET and nothing else. Transpose and recolor
+ * were removed (user decision 2026-08-16): they change the drawing without
+ * changing the representation, so a miss on one of them says the participant
+ * forgot a cosmetic detail rather than the tool they chose.
+ *
+ * Must run inside `withSeededRandom` — vlAdaptChart calls Flint's recommender,
+ * which draws random numbers.
+ */
+export function generateVisualCandidates(chart: SessionChart): DistractorCandidate[] {
+    const out: DistractorCandidate[] = [];
+    const semTypes = semanticTypeMap(chart.metadata);
+    const seen = new Set<string>([specSignature(chart.spec)]);
+
+    const push = (c: DistractorCandidate | null) => {
+        if (!c) return;
+        const sig = specSignature(c.spec);
+        if (seen.has(sig)) return;
+        if (!compiles(c.spec, c.rows, c.metadata)) return;
+        seen.add(sig);
+        out.push(c);
+    };
+
+    const source = chart.spec.chartType;
+    const sourceFields = fieldSet(chart.spec);
+
+    // The geographic position pair IS the basemap. A non-geo target (US Map
+    // → Bar Chart, per the reviewed tables) cannot show longitude/latitude,
+    // so for a geo source the target must show the remaining fields exactly.
+    const geoFields = new Set(
+        ['longitude', 'latitude']
+            .map(ch => chart.spec.encodings[ch]?.field)
+            .filter((f): f is string => !!f));
+
+    for (const target of curatedFor(source).visual) {
+        if (target === source) continue;
+
+        // (1) The target must be plausible on this data.
+        if ((TARGET_GATES[target] ?? []).some(g => !GATES[g].test(chart))) continue;
+
+        let adapted: Record<string, string>;
+        const targetHasGeo = target === 'US Map' || target === 'World Map';
+        if (geoFields.size && !targetHasGeo) {
+            // Geo → non-geo (US Map → Bar Chart, per the reviewed tables):
+            // `vlAdaptChart` maps channel names through and drags the position
+            // pair onto nonsense channels, so build the encoding directly —
+            // the region label on x, the measure on y.
+            const rest = [...sourceFields].filter(f => !geoFields.has(f));
+            const cat = rest.find(f => !isQuantitative(f, chart.metadata));
+            const meas = rest.find(f => isQuantitative(f, chart.metadata));
+            if (!cat || !meas) continue;
+            adapted = { x: cat, y: meas };
+        } else {
+            try {
+                adapted = vlAdaptChart(source, target, encFieldMap(chart.spec), chart.rows, semTypes);
+            } catch { continue; }
+        }
+        if (Object.keys(adapted).length === 0) continue;
+
+        // (2) The target must show exactly the fields the original shows.
+        // vlAdaptChart reads the whole table, so without this it can drop a
+        // series or pull in a column the participant never charted — either
+        // way the lure would show different data, not a different drawing.
+        const targetIsGeo = !!(adapted.longitude || adapted.latitude);
+        const required = geoFields.size && !targetIsGeo
+            ? new Set([...sourceFields].filter(f => !geoFields.has(f)))
+            : sourceFields;
+        const targetFields = new Set(Object.values(adapted).filter(Boolean));
+        if (!sameSet(required, targetFields)) continue;
+
+        // (3) The target's own x axis must suit what it draws there. Checked
+        // after the adaptation, because only the adapted map says which field
+        // the target puts on x.
+        const xField = adapted.x;
+        if ((TARGET_AXIS_GATES[target] ?? []).some(
+            g => !xField || !AXIS_GATES[g].test(xField, chart))) continue;
+
+        // The band is computed from the transition cost, never declared.
+        const band = bandOf(source, target);
+        push({
+            method: 'visual',
+            op: 'mark',
+            band,
+            label: `redrawn as a ${target}`,
+            rationale: `Same data, same values — redrawn as a ${target} (${band} target). Do they remember HOW it was drawn?`,
+            spec: fromFieldMap(target, adapted, chart.spec.config),
+            rows: chart.rows,
+            metadata: chart.metadata,
         });
     }
 
-    // Color shift: the compiled chart is repainted with a rotated palette (see
-    // extract.ts recolorVl). The render-identity guard drops charts where the
-    // palette turns out not to show (e.g. everything grayscale already).
-    for (const shift of [1, 2]) {
-        edits.push({
-            op: 'color',
-            label: `recolored (variant ${shift})`,
-            rationale: 'Identical marks in different colors — pure color memory, nothing else changed.',
-            declaredEdits: [{ op: 'COLOR', detail: `palette variant ${shift}`, cost: EDIT_COSTS.COLOR_SHIFT }],
-            apply: (spec) => {
-                const s = cloneSpec(spec);
-                s.config = { ...s.config, _quizColorShift: shift };
-                return s;
-            },
-        });
-    }
-
-    return edits;
+    return out;
 }
 
-// ── content edits ────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════
+// Data perturbation — the message operators
+// ═════════════════════════════════════════════════════════════════════════
 
-function decimalsOf(vals: number[]): number {
-    let d = 0;
-    for (const v of vals.slice(0, 50)) {
-        const s = String(v);
-        const i = s.indexOf('.');
-        if (i >= 0) d = Math.max(d, Math.min(4, s.length - i - 1));
-    }
-    return d;
+/**
+ * The operators this chart type is permitted to use, in the curated
+ * preference order (curated.ts). An operator that is not in the chart type's
+ * table is never offered, whatever its gate says: it would attack a message
+ * this chart type does not tell.
+ */
+function opPreference(chart: SessionChart): string[] {
+    return curatedFor(chart.spec.chartType).data;
 }
 
-/** group rows by an optional series field, apply fn to each group's measure values */
-function perturbMeasure(
-    rows: any[], measure: string, seriesField: string | undefined,
-    fn: (vals: number[]) => number[],
-): any[] {
-    const groups = new Map<string, number[]>();
-    rows.forEach((r, i) => {
-        const k = seriesField ? String(r[seriesField]) : '_';
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(i);
-    });
-    const out = rows.map(r => ({ ...r }));
-    const dec = decimalsOf(rows.map(r => Number(r[measure])).filter(Number.isFinite));
-    for (const idxs of groups.values()) {
-        const vals = idxs.map(i => Number(rows[i][measure]));
-        const newVals = fn(vals);
-        idxs.forEach((rowIdx, j) => {
-            const v = newVals[j];
-            out[rowIdx][measure] = Number.isFinite(v) ? +v.toFixed(dec) : rows[rowIdx][measure];
+/**
+ * Every data candidate for one chart, in preference order. Each candidate has
+ * already passed its operator's gate AND its floor (the message really
+ * changed), and carries a story signature for the same-story dedupe.
+ *
+ * Must run inside `withSeededRandom`: the stochastic operators (decorrelate,
+ * shuffle, equalize) draw from Math.random.
+ */
+export function generateDataCandidates(chart: SessionChart): DistractorCandidate[] {
+    const roles = resolveRoles(chart);
+    if (!roles.measure) return [];
+    const axis = sortedAxis(chart, roles);
+    const origSignature = takeawaySignature(chart, roles, chart.rows);
+    const out: DistractorCandidate[] = [];
+
+    const order = opPreference(chart);
+    const ops = order
+        .map(id => MESSAGE_OPS.find(o => o.id === id))
+        .filter((o): o is typeof MESSAGE_OPS[number] => !!o);
+
+    for (const op of ops) {
+        if (op.gate(chart, roles)) continue;
+        const applied = op.apply(chart, roles, Math.random);
+        if (!applied) continue;
+
+        // A chart whose labels came out of its derive step in order of size
+        // must keep that order, or the profile alone gives the answer away.
+        let rows = applied.rows;
+        let note = applied.note;
+        if (axis.sorted) {
+            rows = preserveSortedProfile(chart, roles, rows, axis);
+            note += '; put back into the original sorted order';
+        }
+
+        const metrics = messageMetrics(chart, roles, rows);
+        const floor = FLOORS[op.id];
+        if (floor && !floor.test(metrics)) continue;
+
+        const signature = takeawaySignature(chart, roles, rows);
+        if (signature === origSignature) continue;
+
+        out.push({
+            method: 'data',
+            op: op.id,
+            dim: op.dim,
+            label: op.label,
+            rationale: `${op.message} ${op.what}`,
+            spec: cloneSpec(chart.spec),
+            rows,
+            metadata: chart.metadata,
+            dataEditNote: note,
+            signature,
         });
     }
     return out;
 }
 
-function contentEdits(chart: SessionChart, session: SessionData): ContentEdit[] {
-    const edits: ContentEdit[] = [];
-    const roles = chartRoles(chart);
-    const m = roles.measure;
-    const seriesField = roles.colorField && roles.colorField !== roles.category ? roles.colorField : undefined;
-
-    // — sorting —
-    //
-    // Sort goes on the CATEGORY channel. Probed against the real compiler:
-    //   • sortOrder on the *measure* channel is inert — it compiles to a sort
-    //     of a quantitative scale, so the spec changes but the render never
-    //     does.
-    //   • sortOrder alone on the category channel gives an ALPHABETICAL order.
-    //   • sortBy — a CHANNEL reference, not a field name — turns it into a
-    //     BY-VALUE sort (VL's "y"/"-y" shorthand): "was the largest bar at the
-    //     top or the bottom?" Works for Bar Table too.
-    // The render-identity guard drops whichever turns out inert.
-    if (roles.category && m) {
-        for (const dir of ['ascending', 'descending'] as const) {
-            edits.push({
-                op: 'sort-value',
-                label: `sorted ${dir} by value`,
-                rationale: `Same fields and same values, ranked ${dir} — was the largest ${roles.category} at the top or the bottom?`,
-                apply: (spec, rows) => {
-                    const catCh = channelOf(spec, roles.category);
-                    const meaCh = channelOf(spec, m);
-                    if (!catCh || !meaCh || !SORTABLE_CHANNELS.has(meaCh)) return undefined;
-                    const s = cloneSpec(spec);
-                    s.encodings[catCh].sortBy = meaCh;
-                    s.encodings[catCh].sortOrder = dir;
-                    return {
-                        spec: s, rows,
-                        declaredEdits: [{ op: 'SORT', detail: `${catCh}: by ${m} ${dir}`, cost: EDIT_COSTS.SORT_FLIP }],
-                    };
-                },
-            });
-        }
-    }
-    if (roles.category) {
-        for (const dir of ['ascending', 'descending'] as const) {
-            edits.push({
-                op: 'sort-label',
-                label: `sorted ${dir} by label`,
-                rationale: `Same fields and values, ordered alphabetically by ${roles.category} instead of by size.`,
-                apply: (spec, rows) => {
-                    const catCh = channelOf(spec, roles.category);
-                    if (!catCh || !SORTABLE_CHANNELS.has(catCh)) return undefined;
-                    if (spec.encodings[catCh].sortOrder === dir) return undefined;
-                    const s = cloneSpec(spec);
-                    s.encodings[catCh].sortOrder = dir;
-                    return {
-                        spec: s, rows,
-                        declaredEdits: [{ op: 'SORT', detail: `${catCh}: label ${dir}`, cost: EDIT_COSTS.SORT_FLIP }],
-                    };
-                },
-            });
-        }
-    }
-
-    // — aggregation — only offered when the chart aggregates explicitly, so
-    // the flip provably changes what is computed, not just the spec text.
-    if (m) {
-        const currentAgg = roles.measureCh ? chart.spec.encodings[roles.measureCh]?.aggregate : undefined;
-        if (currentAgg) {
-            for (const agg of ['sum', 'mean', 'max'].filter(a => a !== currentAgg).slice(0, 2)) {
-                edits.push({
-                    op: 'aggregate',
-                    label: `aggregate → ${agg}`,
-                    rationale: `Same fields, ${agg} instead of ${currentAgg} — do they remember WHAT was being counted?`,
-                    apply: (spec, rows) => {
-                        const meaCh = channelOf(spec, m);
-                        if (!meaCh) return undefined;
-                        const s = cloneSpec(spec);
-                        s.encodings[meaCh].aggregate = agg;
-                        return { spec: s, rows };
-                    },
-                });
-            }
-        }
-    }
-
-    // — scale — linear → log on the measure axis; strictly-positive measures
-    // with real spread only, so the log rendering is valid and visibly different.
-    if (m) {
-        const vals = chart.rows.map(r => Number(r[m])).filter(Number.isFinite);
-        const min = Math.min(...vals), max = Math.max(...vals);
-        if (vals.length >= 3 && min > 0 && max / min >= 8) {
-            edits.push({
-                op: 'scale',
-                label: 'log scale',
-                rationale: 'Same values on a log axis — the differences flatten. Do they remember how dramatic the gap looked?',
-                apply: (spec, rows) => {
-                    const s = cloneSpec(spec);
-                    s.config = { ...s.config, _quizLogScaleField: m };
-                    return {
-                        spec: s, rows,
-                        declaredEdits: [{ op: 'SCALE', detail: `${m}: linear → log`, cost: EDIT_COSTS.SCALE_CHANGE }],
-                    };
-                },
-            });
-        }
-    }
-
-    // — filtering — a category the participant saw is gone, or the tail is cut.
-    if (roles.category && m) {
-        const cat = roles.category;
-        const catVals = uniq(chart.rows.map(r => r[cat]));
-        if (catVals.length >= 4) {
-            edits.push({
-                op: 'filter',
-                label: 'one category removed',
-                rationale: 'The #2 item is simply missing — do they remember WHO was in the chart?',
-                apply: (spec, rows) => {
-                    const order = [...rows].sort((a, b) => Number(b[m]) - Number(a[m]));
-                    const target = order[Math.min(1, order.length - 1)]?.[cat];
-                    if (target == null) return undefined;
-                    const filtered = rows.filter(r => r[cat] !== target);
-                    if (filtered.length === rows.length) return undefined;
-                    return {
-                        spec: cloneSpec(spec), rows: filtered,
-                        dataEditNote: `category "${String(target).slice(0, 24)}" filtered out`,
-                    };
-                },
-            });
-        }
-        if (catVals.length >= 6) {
-            edits.push({
-                op: 'filter',
-                label: 'bottom quartile dropped',
-                rationale: 'Only the leaders remain — was the chart this short, or did it have a long tail?',
-                apply: (spec, rows) => {
-                    const totals = new Map<any, number>();
-                    for (const r of rows) totals.set(r[cat], (totals.get(r[cat]) ?? 0) + Number(r[m]));
-                    const keepN = Math.ceil(totals.size * 0.75);
-                    const keep = new Set([...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, keepN).map(e => e[0]));
-                    const filtered = rows.filter(r => keep.has(r[cat]));
-                    if (filtered.length === rows.length) return undefined;
-                    return {
-                        spec: cloneSpec(spec), rows: filtered,
-                        dataEditNote: `bottom ${totals.size - keepN} categor${totals.size - keepN === 1 ? 'y' : 'ies'} filtered out`,
-                    };
-                },
-            });
-        }
-        if ((chart.spec.chartType === 'Line Chart' || chart.spec.chartType === 'Area Chart') && catVals.length >= 8) {
-            edits.push({
-                op: 'filter',
-                label: 'series truncated at 75%',
-                rationale: 'The series stops early — do they remember how far it ran?',
-                apply: (spec, rows) => {
-                    const seen: any[] = [];
-                    for (const r of rows) if (!seen.includes(r[cat])) seen.push(r[cat]);
-                    const keep = new Set(seen.slice(0, Math.ceil(seen.length * 0.75)));
-                    const filtered = rows.filter(r => keep.has(r[cat]));
-                    if (filtered.length === rows.length) return undefined;
-                    return {
-                        spec: cloneSpec(spec), rows: filtered,
-                        dataEditNote: `last ${seen.length - keep.size} ${cat} value(s) truncated`,
-                    };
-                },
-            });
-        }
-    }
-
-    // — value perturbation — same spec, same rows count, different numbers.
-    if (m) {
-        const mk = (op: string, label: string, note: string, rationale: string, fn: (vals: number[]) => number[]): ContentEdit => ({
-            op, label, rationale,
-            apply: (spec, rows) => ({
-                spec: cloneSpec(spec),
-                rows: perturbMeasure(rows, m, seriesField, fn),
-                dataEditNote: note,
-            }),
-        });
-
-        edits.push(mk('perturb-rank', 'rank swap (1↔3)', 'top item swapped with #3',
-            'Do they remember WHICH item led, or just that something did?',
-            vals => {
-                const v = [...vals];
-                if (v.length >= 2) {
-                    const order = v.map((x, i) => [x, i] as [number, number]).sort((a, b) => b[0] - a[0]);
-                    const i1 = order[0][1], i2 = order[Math.min(2, v.length - 1)][1];
-                    [v[i1], v[i2]] = [v[i2], v[i1]];
-                }
-                return v;
-            }));
-
-        edits.push(mk('perturb-invert', 'pattern inverted', 'values mirrored in range',
-            'Trend/ranking fully reversed — the strongest pattern-memory probe.',
-            vals => {
-                const lo = Math.min(...vals), hi = Math.max(...vals);
-                return vals.map(v => hi + lo - v);
-            }));
-
-        edits.push(mk('perturb-flatten', 'effect flattened', 'deviations × 0.45',
-            'Same ranking, much weaker effect — do they remember the magnitude?',
-            vals => {
-                const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-                return vals.map(v => mean + (v - mean) * 0.45);
-            }));
-
-        edits.push(mk('perturb-exaggerate', 'effect exaggerated', 'deviations × 1.7',
-            'Same ranking, stronger effect — magnitude memory, other direction.',
-            vals => {
-                const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-                const lo = Math.min(...vals);
-                return vals.map(v => Math.max(lo >= 0 ? 0 : -Infinity, mean + (v - mean) * 1.7));
-            }));
-
-        if (chart.spec.chartType === 'Line Chart' || chart.spec.chartType === 'Area Chart') {
-            edits.push(mk('perturb-peakshift', 'peak shifted', 'series rotated by 25%',
-                'Shape preserved but displaced in x — do they remember WHERE the peak was?',
-                vals => {
-                    const k = Math.max(1, Math.round(vals.length * 0.25));
-                    return vals.map((_, i) => vals[(i + k) % vals.length]);
-                }));
-        }
-
-        // label substitution: a prominent category renamed to a plausible sibling
-        if (roles.category && session.sourceTable) {
-            const col = roles.category;
-            const srcVals = session.sourceTable.metadata[col]
-                ? uniq(session.sourceTable.rows.map(r => r[col]).filter(v => v != null && v !== 'UNKNOWN'))
-                : [];
-            const present = new Set(chart.rows.map(r => r[col]));
-            const pool = srcVals.filter(v => !present.has(v));
-            if (pool.length) {
-                edits.push({
-                    op: 'perturb-label',
-                    label: 'one label swapped',
-                    rationale: 'Every mark identical except one label — pure item-identity memory probe.',
-                    apply: (spec, rows) => {
-                        const order = [...rows].sort((a, b) => Number(b[m]) - Number(a[m]));
-                        const target = order[Math.min(1, order.length - 1)]?.[col]; // rank-2 label
-                        const replacement = pool[Math.floor(pool.length / 2)];
-                        if (target == null) return undefined;
-                        return {
-                            spec: cloneSpec(spec),
-                            rows: rows.map(r => r[col] === target ? { ...r, [col]: replacement } : { ...r }),
-                            dataEditNote: `"${String(target).slice(0, 18)}" relabeled "${String(replacement).slice(0, 18)}" (real sibling value)`,
-                        };
-                    },
-                });
-            }
-        }
-    }
-
-    return edits;
-}
-
 // ═════════════════════════════════════════════════════════════════════════
-// Materialization — one edit, or a composed pair
+// Combined perturbation — the cross cells of the option matrix
 // ═════════════════════════════════════════════════════════════════════════
 
 /**
- * Apply a form edit, a content edit, or BOTH (form first, then content) and
- * return the resulting candidate. Returns null when an edit does not apply to
- * this chart or the result will not compile.
+ * A combined lure: the visual lure's drawing over the data lure's rows.
  *
- * A composed candidate is exactly "A then B" — the same two edits its sibling
- * single-axis lures carry. That is what makes a quiz item a clean 2×2: the
- * participant sees the original, A, B, and A+B, so a wrong pick says which
- * axis failed and the combined option says whether either alone was enough.
+ * Built from two candidates that each already passed their own axis's gates,
+ * floors and purity, so the only new failure mode is the pairing itself —
+ * the target chart type must also compile over the perturbed rows.
  */
-export function materialize(
-    chart: SessionChart,
-    form: { edit: FormEdit; index: number } | undefined,
-    content: { edit: ContentEdit; index: number } | undefined,
+export function combineCandidates(
+    chart: SessionChart, visual: DistractorCandidate, data: DistractorCandidate,
 ): DistractorCandidate | null {
-    if (!form && !content) return null;
-
-    let spec = chart.spec;
-    let rows = chart.rows;
-    let dataEditNote: string | undefined;
-    const declaredEdits: SpecEdit[] = [...(form?.edit.declaredEdits ?? [])];
-
-    if (form) {
-        const next = form.edit.apply(spec);
-        if (!next) return null;
-        spec = next;
-    }
-    if (content) {
-        const r = content.edit.apply(spec, rows);
-        if (!r) return null;
-        spec = r.spec;
-        rows = r.rows;
-        dataEditNote = r.dataEditNote;
-        declaredEdits.push(...(r.declaredEdits ?? []));
-    }
-    if (specSignature(spec) === specSignature(chart.spec) && rows === chart.rows) return null;
-    if (!compiles(spec, rows, chart.metadata)) return null;
-
-    const method: Method = form && content ? 'combined' : form ? 'form' : 'content';
-    const label = form && content ? `${form.edit.label} + ${content.edit.label}`
-        : (form?.edit.label ?? content!.edit.label);
-    const op = form && content ? `${form.edit.op}+${content.edit.op}`
-        : (form?.edit.op ?? content!.edit.op);
-    const rationale = form && content
-        ? `Both axes at once. ${form.edit.rationale} And: ${content.edit.rationale}`
-        : (form?.edit.rationale ?? content!.edit.rationale);
-
+    if (visual.method !== 'visual' || data.method !== 'data') return null;
+    const spec = cloneSpec(visual.spec);
+    if (!compiles(spec, data.rows, chart.metadata)) return null;
     return {
-        method, op, label, rationale,
-        spec, rows, metadata: chart.metadata,
-        dataEditNote,
-        declaredEdits: declaredEdits.length ? declaredEdits : undefined,
-        formIndex: form?.index,
-        contentIndex: content?.index,
+        method: 'combined',
+        op: `${visual.op}+${data.op}`,
+        label: `${visual.label}; ${data.label}`,
+        rationale: `Both changed: ${visual.label}, and ${data.label}. A pick here encoded neither the tool nor the finding.`,
+        spec,
+        rows: data.rows,
+        metadata: chart.metadata,
+        dim: data.dim,
+        band: visual.band,
+        signature: data.signature,
+        dataEditNote: data.dataEditNote,
+    };
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+
+export interface ChartCandidates {
+    visual: DistractorCandidate[];
+    data: DistractorCandidate[];
+}
+
+/**
+ * Every candidate for one chart, in preference order per axis. Must run
+ * inside `withSeededRandom` — both axes draw random numbers.
+ *
+ * The session argument stays for the callers' sake; the current generators
+ * work from the chart alone.
+ */
+export function generateCandidates(chart: SessionChart, _session?: SessionData): ChartCandidates {
+    return {
+        visual: generateVisualCandidates(chart),
+        data: generateDataCandidates(chart),
     };
 }
 
 /**
- * Caps on the composition grid. Every (form, content) pair inside the caps is
- * materialized, because the quiz must be able to compose whichever A and B it
- * ends up choosing — a pair generated at random would not be the same A and B.
- * The caps bound that grid at 10 × 14 = 140 compile probes per chart, which is
- * cheap next to one render. Applied AFTER `interleaveByOp`, so what they trim
- * is a third mark target or a fourth filter, never a whole operation.
- */
-export const FORM_CAP = 10;
-export const CONTENT_CAP = 14;
-
-export interface ChartCandidates {
-    form: DistractorCandidate[];
-    content: DistractorCandidate[];
-    /** key `${formIndex}:${contentIndex}` → the composed candidate */
-    pairs: Map<string, DistractorCandidate>;
-}
-
-export const pairKey = (formIndex: number, contentIndex: number) => `${formIndex}:${contentIndex}`;
-
-/**
- * Every candidate for one chart: single-axis lures plus the full composition
- * grid over them. Must run inside `withSeededRandom` — mark edits call Flint's
- * recommender, which draws random numbers.
- */
-export function generateCandidates(chart: SessionChart, session: SessionData): ChartCandidates {
-    const fEdits = interleaveByOp(formEdits(chart)).slice(0, FORM_CAP);
-    const cEdits = interleaveByOp(contentEdits(chart, session)).slice(0, CONTENT_CAP);
-
-    const form: DistractorCandidate[] = [];
-    const content: DistractorCandidate[] = [];
-    const pairs = new Map<string, DistractorCandidate>();
-
-    // Dedupe singles per axis; a duplicate spec is a duplicate option.
-    const seenForm = new Set<string>();
-    fEdits.forEach((edit, index) => {
-        const c = materialize(chart, { edit, index }, undefined);
-        if (!c) return;
-        const sig = specSignature(c.spec);
-        if (seenForm.has(sig)) return;
-        seenForm.add(sig);
-        form.push(c);
-    });
-
-    const seenContent = new Set<string>();
-    cEdits.forEach((edit, index) => {
-        const c = materialize(chart, undefined, { edit, index });
-        if (!c) return;
-        // rows can differ per edit, so key the dedupe on spec + operation
-        const sig = `${specSignature(c.spec)}||${edit.op}:${edit.label}`;
-        if (seenContent.has(sig)) return;
-        seenContent.add(sig);
-        content.push(c);
-    });
-
-    // Only pairs whose two halves both survived as singles: the quiz picks A
-    // and B from those lists, so a pair over a dropped half is unreachable.
-    for (const f of form) {
-        for (const c of content) {
-            const pair = materialize(
-                chart,
-                { edit: fEdits[f.formIndex!], index: f.formIndex! },
-                { edit: cEdits[c.contentIndex!], index: c.contentIndex! },
-            );
-            if (pair) pairs.set(pairKey(f.formIndex!, c.contentIndex!), pair);
-        }
-    }
-
-    return { form, content, pairs };
-}
-
-// ═════════════════════════════════════════════════════════════════════════
-
-/**
- * Axis-purity violations. A form lure that changed the data, or a content
- * lure that changed the drawing, would corrupt the quiz's analysis — the
- * lure's axis is the *meaning* of a wrong answer.
+ * Axis-purity violations. A visual lure that changed the data, or a data lure
+ * that changed the drawing, would corrupt the quiz's analysis — the lure's
+ * axis is the *meaning* of a wrong answer.
  */
 export function purityViolation(chart: SessionChart, c: DistractorCandidate): string | null {
-    if (c.method === 'form') {
-        if (c.rows !== chart.rows) return 'form lure changed the rows';
+    if (c.method === 'visual') {
+        if (c.rows !== chart.rows) return 'visual lure changed the rows';
         const origEnc = chart.spec.encodings, newEnc = c.spec.encodings;
         for (const ch of Object.keys(newEnc)) {
             const o = Object.values(origEnc).find(e => e.field === newEnc[ch].field);
             if (o && ((o.sortOrder ?? '') !== (newEnc[ch].sortOrder ?? '')
                 || (o.aggregate ?? '') !== (newEnc[ch].aggregate ?? ''))) {
-                return 'form lure changed sort/aggregate';
+                return 'visual lure changed sort/aggregate';
             }
         }
     }
-    if (c.method === 'content') {
-        if (c.spec.chartType !== chart.spec.chartType) return 'content lure changed the chart type';
-        const a = JSON.stringify(encFieldMap(chart.spec)), b = JSON.stringify(encFieldMap(c.spec));
-        if (a !== b) return 'content lure changed the field mapping';
+    if (c.method === 'data') {
+        if (specSignature(c.spec) !== specSignature(chart.spec)) {
+            return 'data lure changed the drawing';
+        }
+        if (!c.dim) return 'data lure carries no message dimension';
     }
-    if (c.method === 'combined' && (c.formIndex === undefined || c.contentIndex === undefined)) {
-        return 'combined lure is not a composition of a form and a content edit';
+    if (c.method === 'combined') {
+        if (c.rows === chart.rows) return 'combined lure kept the rows';
+        if (specSignature(c.spec) === specSignature(chart.spec)) {
+            return 'combined lure kept the drawing';
+        }
+        if (!c.dim || !c.band) return 'combined lure carries no dimension or band';
     }
     return null;
 }
@@ -696,7 +512,7 @@ export function enforcePurity(chart: SessionChart, candidates: DistractorCandida
 }
 
 /** Flat candidate list — author view and the offline gallery show all of them. */
-export function generateAll(chart: SessionChart, session: SessionData): DistractorCandidate[] {
-    const { form, content, pairs } = generateCandidates(chart, session);
-    return enforcePurity(chart, [...form, ...content, ...pairs.values()]);
+export function generateAll(chart: SessionChart, session?: SessionData): DistractorCandidate[] {
+    const { visual, data } = generateCandidates(chart, session);
+    return enforcePurity(chart, [...visual, ...data]);
 }

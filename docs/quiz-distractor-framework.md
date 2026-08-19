@@ -1,292 +1,239 @@
 # Quiz distractor framework: message-anchored lures
 
-Status: design (2026-08-12). This document governs `src/lib/quiz-distractors/`.
-It replaces the flat `NEAR_MARKS` / `MID_MARKS` / `FAR_MARKS` lists in
-`generators.ts`. It also replaces the perturbation list that ignores the chart
-type.
+Status: design v6 (2026-08-18). This document governs `src/lib/quiz-distractors/`.
+
+v5 restored the v3 idea: the typical transformations of each chart type are
+**declared per chart type**, in curated tables (`curated.ts`). The derived
+target roster of v4 is gone. v5 also changed the item composition: each quiz
+item is an **option matrix** (3×3 target, 2×2 minimum) with **combined**
+lures in the cross cells. The v4 machinery stays below the tables as a
+backstop: gates, the compile probe, the purity contract, and the render
+guard.
+
+v6 replaces the v5 tables with tables the researcher reviewed, one chart
+type at a time (2026-08-18). The review made most lists SHORTER: a lure
+must be a transformation a participant would see as a plausible tool or a
+plausible finding, and near-duplicates (Scatter ↔ Regression, Strip ↔
+Scatter) do not count. The review also admitted lures the machinery cannot
+build yet; these are listed under "Deferred machinery" and are NOT in
+`curated.ts`.
 
 Written in ASD-STE100 Simplified Technical English.
 
-## Problem
+Terminology in this document:
 
-The current generator applies the same mark targets to all charts. It also
-applies the same five perturbations to all charts. This causes bad lures.
+- **Visual perturbation** = keep the underlying data; change the mark type.
+  The finding stays the same. The lure tests whether the participant
+  remembers the **tool** they used to get the finding.
+- **Data perturbation** = keep the visual representation; change the
+  underlying data distribution. The finding becomes different. The lure
+  tests whether the participant remembers the **finding** itself.
+- **Combined perturbation** = the visual lure's drawing over the data
+  lure's rows. Both changed. A participant who picks it encoded neither
+  the tool nor the finding.
 
-Example 1: a bar chart with nominal categories becomes a line chart. The line
-chart shows a trend that is not in the data.
+## The option matrix
 
-Example 2: a time series becomes a pie chart. The pie chart removes the order
-of the points.
+Each item shows the options as a cross of the two axes:
 
-A participant rejects these lures because they are not plausible. The
-participant does not use memory. The quiz item measures nothing.
+|              | original data | data lure D1 | data lure D2 |
+|---|---|---|---|
+| **original mark** | the correct answer | data lure | data lure |
+| **mark lure V1**  | visual lure | combined V1×D1 | combined V1×D2 |
+| **mark lure V2**  | visual lure | combined V2×D1 | combined V2×D2 |
+
+- The target is 3×3: the original + 2 visual + 2 data + 4 combined = 9
+  options.
+- A chart type that admits only one lure on an axis shrinks the matrix
+  (2×3, 3×2, or 2×2). Below 2×2 the quiz skips the chart.
+- Every option carries its cell `(v, d)`. The original is (0,0). The
+  answer record keeps the cell, so the analysis can place each miss.
+- The participant sees the options shuffled, not as a grid.
 
 ## Core concept: the message statistic
 
 Each chart type shows one primary takeaway. We call this the **message
-statistic**.
+statistic**. A data perturbation must change this statistic. A visual
+perturbation must keep it. This rule did not change from v3.
 
-| Chart family | Message statistic |
-|---|---|
-| Bar / Lollipop / Bar Table | The ranking and the gap sizes |
-| Grouped Bar | The interaction between two factors |
-| Stacked Bar | The composition of each category and the total ranking |
-| Line / Area | The trend shape: direction, peaks, slope, endpoints |
-| Scatter | The association: sign, strength, outliers |
-| Pie / Rose | The dominant share and the majority boundary |
-| Heatmap | The hotspot location and the gradient direction |
-| Histogram / Density / Boxplot | The distribution shape: modes, skew, center, spread |
+## P1 — Visual perturbation
 
-We define the two lure axes with this statistic. The two axes point in
-opposite directions.
+The permitted mark transitions are DECLARED per chart type in `curated.ts`,
+in preference order. A curated target must still pass, on this chart's data:
 
-## Chart type characterization
+1. **The plausibility gates.** A radial target needs non-negative values
+   and few categories (`nonNeg`, `maxCats8`). A trend target needs an
+   ordered x axis (`orderedX`). A fitted line needs a quantitative x axis
+   (`quantX`).
+2. **The same-fields check.** The adapted encoding must show exactly the
+   fields the original shows — no dropped series, no new column.
+3. **The compile probe.** The target must compile through the app's own
+   assembler over the same rows.
+4. **The purity contract.** A visual lure does not touch the rows, the
+   sort, or the aggregate.
 
-This table covers the full Data Formulator roster, in its six template
-categories. The data type names the fields that the chart requires. The
-message statistic is the takeaway that the encoding shows. A content
-perturbation must change this statistic. A form swap must keep it.
+The difficulty band (near / mid / far) is COMPUTED from the mark-transition
+cost in `distance.ts`. It is never declared in the tables.
+
+## P2 — Data perturbation
+
+The permitted operators are DECLARED per chart type in `curated.ts`, by
+operator id, in preference order. Each operator attacks one dimension of
+the message:
+
+| Dimension | Question probed | Implemented operators |
+|---|---|---|
+| **Direction** | Which way did it go? | `reassign-reverse` (values move to the labels in the opposite order), `antitone` (the y ranks flip, bivariate), `series-exchange` (two series trade all values), `dist-mirror` (the skew mirrors), `negate` (every value changes its sign; gate: mixed signs) |
+| **Location** | Where was the peak or the leader? | `reassign-rotate` (cyclic move along an ordered axis), `dist-shift` (the center moves along a continuous axis). `reassign-swap` (the top two trade values) stays implemented, but no v6 table uses it: a swap moves only two values, which is too subtle (review 2026-08-18). |
+| **Existence** | Was there a pattern at all? | `decorrelate` (permute y, bivariate), `shuffle` (permute the values among the labels), `equalize` (all values move to the mean) |
+| **Strength** | How big was the effect? | `attenuate` (deviations × 0.45), `polarize` (deviations × 1.7), `attenuate-relation` / `polarize-relation` (residuals scale, bivariate), `dist-widen` (deviations × 1.8 on raw values) |
+
+The factors ×0.45 and ×1.7 come from the v3 tables (gap flatten, gap
+exaggerate).
+
+Every operator keeps its GATE (refuse before work) and its FLOOR (verify
+after work): an operator that did not change the message enough is dropped,
+whatever its name says. The sorted-profile rule also stays: a decoy on a
+size-sorted axis goes back into the sorted order, so the profile shape does
+not give the answer away.
+
+The `dist-*` operators are new in v5. A Histogram or a Density Plot has no
+label axis, so the label operators cannot run there; the `dist-*` operators
+work on the raw values of the one quantitative field, per series.
+
+## Combined perturbation
+
+A combined lure takes a visual candidate and a data candidate that each
+passed their own axis, and pairs them: the visual lure's spec over the data
+lure's rows. The pairing must compile and render. Its purity rule is the
+inverse of the pure axes: it MUST change both the rows and the drawing.
+
+## The framework tables (reviewed 2026-08-18)
+
+These tables mirror `curated.ts`, which is the source of truth. Each visual
+list is in preference order (nearest first). Each data list is in operator
+preference order; the selector takes two, on two different dimensions where
+possible. "Review:" names what the review changed against v5.
 
 ### Points
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Scatter Plot | Two quantitative fields (x, y) + one optional nominal field (color) + one optional quantitative field (size) | Show the relation between two measures. Message = the association: its sign, its strength, its clusters, and its outliers. |
-| Regression | Two quantitative fields + a fitted line | Show the same relation, with the trend made explicit. Message = the direction and the strength of the linear relation. |
-| Ranged Dot Plot | One nominal field (category) + one quantitative field measured at two conditions (dumbbell: line + two points) | Compare two conditions in each category. Message = the gap between the two points, and its direction, per category. |
-| Strip Plot | One nominal field (category) + one quantitative field (each row = one mark, jittered) | Show each individual value in each category. Message = the density and the outliers, with no aggregation. |
+| Chart type | Visual targets | Data operators | Notes from the review |
+|---|---|---|---|
+| Scatter Plot | Heatmap (binned) | antitone, decorrelate, attenuate-relation, polarize-relation | Scatter ↔ Regression does not count (too close); Strip Plot reads the same as a scatter. A binned Histogram is admitted by design — deferred (same-fields exemption). |
+| Regression | Heatmap (binned) | the same as Scatter Plot | the same |
+| Ranged Dot Plot | Grouped Bar Chart, Stacked Bar Chart, Strip Plot, Scatter Plot | series-exchange, shuffle, attenuate | Stacked Bar and Strip/Scatter added; Lollipop dropped. Rank swap replaced by shuffle: a swap moves only two values. |
+| Strip Plot | Boxplot | shuffle, reassign-reverse | Scatter dropped (reads the same); the category swap dropped. |
 
 ### Bars
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Bar Chart | One nominal field + one quantitative field | Compare magnitudes across categories. Message = the ranking and the gap sizes. |
-| Grouped Bar Chart | Two nominal fields (x, group) + one quantitative field | Compare a measure across two factors, side by side. Message = the interaction: does the same series lead in each group? |
-| Stacked Bar Chart | Two nominal fields (x, color) + one quantitative field. Gate: the sum has meaning. | Show the parts and the totals together. Message = the composition of each bar and the ranking of the totals. |
-| Lollipop Chart | One nominal field + one quantitative field | The same as Bar Chart, with less ink. Message = the ranking and the gap sizes. |
-| Waterfall Chart | One ordered field (sequence) + one quantitative field (signed deltas) | Show how sequential gains and losses build a total. Message = the running sum: which steps add, which steps remove, and the end level. |
+| Chart type | Visual targets | Data operators | Notes from the review |
+|---|---|---|---|
+| Bar Chart | Lollipop Chart, Bar Table, Pie Chart | reassign-reverse, equalize | Heatmap dropped; rank swap and the gap-scaling pair dropped. Line / Area stay banned: a nominal axis shows a trend that is not real. |
+| Lollipop Chart | Bar Chart, Bar Table, Pie Chart | the same as Bar Chart | the same |
+| Bar Table | Bar Chart, Lollipop Chart, Pie Chart | the same as Bar Chart | the same |
+| Grouped Bar Chart | Stacked Bar Chart, Line Chart (ordered x) | series-exchange, attenuate, equalize | Heatmap dropped; the one-group leader swap dropped. |
+| Stacked Bar Chart | Grouped Bar Chart, Line Chart + series (ordered x) | series-exchange, reassign-reverse, equalize | Streamgraph and stacked Area dropped; the multi-line added. |
+| Waterfall Chart | Bar Chart (the same signed deltas) | reassign-rotate, negate | The sign flip (negate) added; swap and attenuate dropped. A running-sum Line is admitted by design — deferred (needs a derive). |
 
 ### Distributions
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Histogram | One quantitative field (binned; y = count) | Show the shape of one distribution. Message = the modes, the skew, the center, and the spread. |
-| Density Plot | One quantitative field + one optional nominal field (color, for overlaid groups) | Show the same shape, smooth. With groups: compare distributions. Message = the shape, and the offset between group shapes. |
-| Boxplot | One nominal field + one quantitative field | Compare distribution summaries across categories. Message = the medians, the spreads, and the outliers, per category. |
-| Pyramid Chart | One ordered field (ordered bins, e.g. age) + one quantitative field, split by a binary nominal field (the two sides) | Compare two populations mirror-wise. Message = the asymmetry between the two sides, and the bulges. |
-| Candlestick Chart | One ordered field (period) + four quantitative fields (open, high, low, close) | Show the movement inside each period. Message = the direction (up or down) and the range, per period, and the run across periods. |
+| Chart type | Visual targets | Data operators | Notes from the review |
+|---|---|---|---|
+| Histogram | Density Plot, Strip Plot, Boxplot | dist-shift, dist-mirror, dist-widen | Unchanged. |
+| Density Plot | Histogram, Strip Plot, Boxplot | the same as Histogram | Unchanged. |
+| Boxplot | Strip Plot, Density Plot (grouped, ≤ 6 categories) | reassign-reverse, shuffle | Grouped Density added; the top-median swap dropped. |
+| Pyramid Chart | Grouped Bar Chart, Line Chart (the two side profiles) | series-exchange, reassign-rotate, attenuate | The side-profile lines added. |
+| Candlestick Chart | none shipped | none shipped | The review ADMITS: a close-only Line (and possibly Ranged Dot of high–low, or a Waterfall of the moves), open/close reversal, big-day rotation. All need machinery — see "Deferred machinery". Until then the type is skipped. |
 
 ### Lines & Areas
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Line Chart | One ordered field + one quantitative field + one optional nominal field (color, series) | Show change across an ordered axis. Message = the trend shape: direction, peaks, slope, endpoints — and where series cross. |
-| Bump Chart | One ordered field + one nominal field (series); y = rank, not value | Show the rank order across time. Message = who is above whom, and where they overtake. The values are gone; only the order stays. |
-| Area Chart | One ordered field + one quantitative field ≥ 0. Gate: a zero baseline has meaning. | Show the trend and the accumulated magnitude. Message = the trend shape and the level. |
-| Streamgraph | One ordered field + one nominal field (series) + one quantitative field ≥ 0 | Show how the total and its composition change together. Message = the width of the whole flow, and the growth or decay of each band. |
+| Chart type | Visual targets | Data operators | Notes from the review |
+|---|---|---|---|
+| Line Chart | Area Chart, Bar Chart, Scatter Plot (points) | reassign-reverse, reassign-rotate, attenuate, polarize | Bump dropped as a target; detrend (equalize) dropped. Pie / Rose stay banned: they destroy the ordered axis. |
+| Area Chart | Line Chart, Bar Chart, Scatter Plot (points) | the same as Line Chart | Streamgraph dropped. |
+| Bump Chart | Line Chart (values) | reassign-reverse, reassign-rotate, shuffle | Unchanged. |
+| Streamgraph | Area Chart, Stacked Bar Chart, Line Chart + series | series-exchange, reassign-rotate, attenuate, equalize | The unstacked multi-line added. |
 
 ### Circular
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Pie Chart | One nominal field (color) + one quantitative field (size = angle). Gate: the sum has meaning; values ≥ 0. | Show the part-to-whole. Message = the dominant share and the majority boundary (is one slice more than half?). |
-| Rose Chart | One nominal field (often cyclic, e.g. months) + one quantitative field (radius) | Compare magnitudes around a cycle. Message = which sector is largest, and the cyclic pattern. |
-| Radar Chart | One nominal field (the axes = dimensions) + one quantitative field + one optional nominal field (color, series) | Show the profile of one or more items across many dimensions. Message = the shape of the profile: balance against spikes, and the overlap between items. |
+| Chart type | Visual targets | Data operators | Notes from the review |
+|---|---|---|---|
+| Pie Chart | Rose Chart, Bar Chart | reassign-reverse, equalize | The dominant-share swap and the majority flip dropped. |
+| Rose Chart | Pie Chart, Bar Chart | reassign-reverse, equalize | The rotation dropped. |
+| Radar Chart | Rose Chart, Bar Chart | reassign-reverse, equalize | The spike swap and the flatten dropped. |
 
 ### Tables & Maps
 
-| Chart type | Data type | Meaning / goal (message statistic) |
-|---|---|---|
-| Heatmap | Two nominal or ordered fields (x, y) + one quantitative field (color) | Show a pattern across a grid. Message = the hotspot locations and the gradient direction. |
-| Bar Table | One nominal field (label column) + one quantitative field (bar column) | Look up and compare exact values. Message = the ranking, with each value readable. |
-| US Map / World Map | Geographic position (longitude, latitude or region) + one quantitative field (color or size) | Show where the values sit. Message = the spatial pattern: which regions are high, which are low, and the clusters. |
-
-## The two principles
-
-**P1 — Form (mark swap): change the encoding. Do not change the message.**
-
-A mark target is permitted only if:
-- (a) It accepts the same field roles.
-- (b) It shows the same message statistic.
-
-The lure must be a chart that the participant could make for the same
-question. Form lures test verbatim memory. Verbatim memory is memory of how
-the chart was drawn.
-
-**P2 — Content (data perturbation): change the message. Do not change the
-encoding.**
-
-A perturbation is permitted only if:
-- (a) It changes the message statistic.
-- (b) The result stays in distribution: same rows, same fields, plausible
-  values.
-
-A perturbation that keeps the message statistic is not detectable. It is not
-permitted. Content lures test gist memory. Gist memory is memory of what the
-data said.
-
-These principles sit on top of the purity contract. The purity contract does
-not change: a form edit does not touch the rows, and a content edit does not
-touch the encoding.
-
-## Derived difficulty
-
-We do not declare difficulty. We compute it.
-
-- **Form distance** = the number of steps on the Cleveland–McGill channel
-  ranking: position → length → angle → area → color. The same channel is near
-  (Bar → Lollipop). One step across is far (Bar → Pie: length → angle). The
-  last channel is farthest (Bar → Heatmap: length → color).
-- **Content distance** = the scope of the message change. A magnitude change
-  (gap sizes) is smallest. A local identity change (one rank swap) is larger.
-  A global pattern change (full inversion) is largest.
-
-## The framework table
-
-Each row is one transformation. A gate is a hard condition. The generator
-tests the gate before it offers the edit. The generator never makes a
-transformation that is not permitted.
-
-### Bar Chart (family: Lollipop, Bar Table)
-
-Goal: compare magnitudes across categories. Message = the ranking and the gap
-sizes.
-
-| Axis | Transformation | Why | Gate |
+| Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Form | → Lollipop | The same position channel. The nearest form lure. It tests only mark-shape memory. (near) | — |
-| Form | → Bar Table | The same values as labeled bars. It tests layout memory. (near) | — |
-| Form | → Pie | The length channel becomes the angle channel. (far) | Values ≥ 0. The sum has meaning. ≤ ~8 categories. |
-| Form | → Heatmap strip | The length channel becomes the color channel. (farthest) | The message is a comparison, not exact values. |
-| Form | ✗ → Line / Area | Not permitted. A nominal category axis shows a trend that is not real. | — |
-| Content | Rank swap (1↔2 / 1↔3) | It changes which item leads. This is a local identity change. | ≥ 2 categories |
-| Content | Rank inversion | It mirrors all values. It reverses the global pattern. The strongest gist probe. | — |
-| Content | Gap flatten (×0.45) | The ranking stays. The effect becomes weaker. It tests magnitude memory. | — |
-| Content | Gap exaggerate (×1.7) | The ranking stays. The effect becomes stronger. It tests magnitude memory. | — |
-| Content | ✗ Jitter that keeps the ranks | Not permitted. It does not change the message. | — |
+| Heatmap | Grouped Bar Chart, Scatter Plot (size), Stacked Bar Chart | reassign-reverse, attenuate, shuffle | Stacked Bar added; the hotspot swap dropped from the data axis. |
+| US Map | Bar Chart (regions as categories) | shuffle, reassign-reverse, equalize | The basemap swap dropped — a wrong basemap is implausible on sight. Rank swap replaced by shuffle: a swap moves only two values, and a shuffle moves the hotspot with the whole pattern. |
+| World Map | the same as US Map | the same as US Map | the same |
+| KPI Card | none | none — one collapsed number has no look-alike space | — |
 
-### Grouped Bar Chart
+## Deferred machinery
 
-Goal: compare a measure across two factors. Message = the interaction.
+The review admitted these lures by design. The code cannot build them yet,
+so they are NOT in `curated.ts`. Each names the machinery it waits for.
 
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Stacked Bar | The same fields. The emphasis moves from comparison to composition. (near) | The sum has meaning. |
-| Form | → Line + color series | The groups become series. The position channel stays. (mid) | The x axis is ordinal or temporal. |
-| Form | → Heatmap | A category × category grid. The value becomes color. (far) | Many groups. |
-| Content | Leader swap in one group | The winner of one group changes. This is a local interaction change. | — |
-| Content | Effect inversion | "A > B in each group" becomes "B > A in each group". A global change. | A constant effect exists. |
-| Content | Flatten between groups | The groups become almost equal. It tests magnitude memory. | — |
+1. **Scatter / Regression → binned Histogram.** The target shows one of the
+   two measures, so the same-fields rule needs a per-pair exemption, and
+   the purity check needs the "declared derivation" extension (the rows of
+   the lure are a recorded deterministic transform of the originals).
+2. **Waterfall → Line of the running-sum levels.** Needs a cumulative
+   derive of the delta column, under the same declared-derivation rule.
+3. **Candlestick → close-only Line** (and possibly Ranged Dot of high–low,
+   or a Waterfall of close-to-close moves). Needs the same-fields
+   exemption; the roles resolver must also learn the open/high/low/close
+   channels before any data operator can run on this type.
+4. **Candlestick data operators: open/close reversal, big-day rotation.**
+   The reversal is a per-row swap of two fields (consistency holds by
+   construction); the rotation must rebuild the chain across periods.
 
-### Stacked Bar Chart
+## Selection
 
-Goal: show the part-to-whole of each category and the totals. Message = the
-composition and the total ranking.
+`select.ts` assembles each item:
 
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Grouped Bar | It unstacks the bars. Composition becomes comparison. (near) | — |
-| Form | → Streamgraph / Area | The same composition across time. (mid) | The x axis is temporal. |
-| Content | Move the shares, keep the totals | The bar heights stay. The segments change. It tests composition memory. | — |
-| Content | Change the totals, keep the shares | The profile stays. The heights change. It tests magnitude memory. | — |
-| Content | Dominant-segment swap | The largest segment of a bar changes owner. | — |
+1. Render the original. Every later option must differ from every accepted
+   option by render hash, and must not draw `NaN` / `undefined`.
+2. Walk the curated visual candidates; keep up to 2 that render. The
+   stripped-picture compare also runs here, so two targets that draw the
+   same marks under different titles cannot both appear.
+3. Walk the curated data candidates; keep up to 2 that render, on two
+   different dimensions where possible, with the same-story dedupe.
+4. Fill the cross cells with combined lures. Try the largest rectangle
+   first (2×2 of lures); when a cell fails, shrink toward one lure per
+   axis. When no cell can be made, skip the chart.
+5. `verifyQuizItems` asserts the invariants at runtime: a full rectangle,
+   the correct answer at (0,0), each cell's method and payload matched to
+   its coordinates, no two options that render identically.
 
-### Line Chart
+## Implementation map
 
-Goal: show change across an ordered axis. Message = the trend shape.
+| Concern | File |
+|---|---|
+| The per-chart tables (this document's source of truth) | `curated.ts` |
+| Candidate generation, combined pairing, purity | `generators.ts` |
+| Message operators, gates, floors, signatures | `messageOps.ts` |
+| Matrix assembly, scoring, invariants | `select.ts` |
+| Render guard (hash, strip, degenerate text) | `guard.ts` |
+| Distances (bands are computed here) | `distance.ts` |
 
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Area | The same position channels, with fill. (near) | A zero baseline has meaning. |
-| Form | → Bar on the same axis | Continuous position becomes discrete position. (mid) | — |
-| Form | → Scatter (points only) | It removes the line. It removes the emphasis on continuity. (mid) | — |
-| Form | → Bump Chart | The value becomes a rank. (far) | More than one series. The message is rank across time. |
-| Form | ✗ → Pie / Rose | Not permitted. It destroys the ordered axis. | — |
-| Content | Trend inversion (mirror) | A rise becomes a fall. A global pattern change. | — |
-| Content | Peak shift (rotate ~25%) | The shape stays. It moves along x. It tests peak-location memory. | — |
-| Content | Slope flatten / exaggerate | The direction stays. The steepness changes. It tests magnitude memory. | — |
-| Content | Truncation | The series stops early. It tests endpoint memory. | ≥ 8 points |
-| Content | Crossing swap | It changes which series overtakes, and when. | More than one series. The series cross. |
+## Change log
 
-### Area Chart
-
-Goal: show the trend and the accumulated magnitude. Message = the trend shape
-and the level.
-
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Line | It removes the fill. The reverse near pair. (near) | — |
-| Form | → Streamgraph | The same fill, with a baseline that moves. (mid) | More than one series. |
-| Content | (all Line Chart operators) | The message statistic is the same. | The same gates. |
-| Content | Baseline shift | The shape stays. The level changes. It tests magnitude memory. | — |
-
-### Scatter Plot
-
-Goal: show the relation between two quantitative fields. Message = the
-association.
-
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Regression | The same marks, with a fitted line. It makes the message explicit. (near) | — |
-| Form | → Heatmap (binned) | The position pair becomes color density. (far) | Sufficient points to bin. |
-| Form | ✗ → Bar / Line | Not permitted. It requires aggregation. Aggregation is a content change. | — |
-| Content | Sign flip | It reflects y in its range. A positive association becomes negative. | A visible association exists. |
-| Content | Attenuation | It moves y toward the trend line. A strong association becomes weak. | — |
-| Content | Move or remove an outlier | The point that the participant remembers moves, or is gone. | An outlier exists. |
-
-### Pie Chart / Rose Chart
-
-Goal: show the part-to-whole. Message = the dominant share and the majority
-boundary.
-
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | Rose ↔ Pie | Angle becomes radius. The same radial family. (near) | — |
-| Form | → Bar Chart | Angle becomes position. The classic Cleveland–McGill contrast. (far) | — |
-| Form | ✗ → Line / Area | Not permitted. There is no order to plot. | — |
-| Content | Dominant-share swap | The largest slice and the second slice trade sizes. | ≥ 2 slices |
-| Content | Majority flip | A slice above 50% goes below 50%. It crosses a category boundary in memory. | A majority slice exists. |
-| Content | Equalization | The shares become almost equal. "Was one slice dominant?" | — |
-
-### Heatmap
-
-Goal: show a pattern across two dimensions with color. Message = the hotspot
-location and the gradient direction.
-
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | → Grouped Bar | Color becomes position. (far) | A grid of moderate size. |
-| Form | → Scatter with size | Color becomes area. (mid) | A sparse grid. |
-| Content | Hotspot relocation | The hot region moves. It tests location memory. | — |
-| Content | Gradient inversion | Hot and cold trade places. A global change. | — |
-| Content | Contrast flatten | The pattern stays. The contrast becomes weaker. It tests magnitude memory. | — |
-
-### Histogram / Density / Boxplot
-
-Goal: show the distribution shape. Message = the modes, the skew, the center,
-and the spread.
-
-| Axis | Transformation | Why | Gate |
-|---|---|---|---|
-| Form | Histogram ↔ Density | The same shape: binned against smooth. (near) | — |
-| Form | → Strip Plot | The aggregate becomes individual marks. (mid) | — |
-| Form | → Boxplot | The shape becomes a five-number summary. A large abstraction. (far) | — |
-| Content | Skew mirror | A left skew becomes a right skew. A shape change. | A visible skew exists. |
-| Content | Mode shift | The peak moves along x. It tests location memory. | — |
-| Content | Spread change | The center stays. The spread becomes wider or narrower. | — |
-
-## Implementation notes
-
-1. Replace `NEAR_MARKS` / `MID_MARKS` / `FAR_MARKS` with a table of permitted
-   targets for each chart type. Each target has a gate. Keep the compile probe
-   as a backstop. Do not use the compile probe to select targets.
-2. Select the content operators with the message statistic of the chart type.
-   Keep the current operators where they apply. Add the new operators: sign
-   flip (scatter), share reallocation (stacked), majority flip (pie), hotspot
-   relocation (heatmap). Do not offer an operator that does not change the
-   message of that chart type.
-3. Compute the difficulty bands from the two distance definitions. Do not
-   declare the bands in a list. Record the band on each candidate for the
-   study analysis.
-4. Do not change the purity contract in `enforcePurity`. It sits below this
-   framework.
+- **v3 (2026-08-12).** Per-chart tables for form and content. Never fully
+  implemented.
+- **v4 (2026-08-16).** Derived visual roster; visual axis without a quota;
+  transpose and recolor removed. The data axis kept generic operators.
+- **v5 (2026-08-17).** The v3 tables return, on the v4 machinery. The item
+  becomes an option matrix with combined lures. `polarize` moves to ×1.7
+  (the v3 value). The `dist-*` operators give Histogram / Density Plot a
+  data axis. Transpose and recolor stay removed.
+- **v6 (2026-08-18).** The tables reviewed with the researcher, one chart
+  type at a time. Most lists become shorter; near-duplicate retargets
+  (Scatter ↔ Regression, Strip ↔ Scatter) no longer count. `negate` added
+  for signed deltas. Candlestick admitted by design but deferred. The
+  basemap swap for maps dropped in favor of a regions bar chart. Later the
+  same day: `reassign-swap` removed from the last three tables (Ranged Dot,
+  US/World Map) — a swap moves only two values, which is too subtle;
+  shuffle takes its place, so those tables probe direction + existence.

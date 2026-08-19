@@ -8,9 +8,10 @@ import {
 } from '../../../../src/app/provenanceQuiz';
 
 /** A chain a→b→c→d plus a second branch off a, so `previous` is exercised both ways. */
-const chart = (id: string, num: number, parent: string | null): TraceChart => ({
+const chart = (id: string, num: number, parent: string | null, inReport = false): TraceChart => ({
     chartId: id, num, title: `chart ${id}`, chartType: 'bar', tableId: `t-${id}`,
     svg: '<svg/>', parentChartId: parent, actualPrompt: `prompt ${id}`, promptSource: 'user',
+    inReport,
 });
 
 const material = (): TraceMaterial => {
@@ -97,6 +98,32 @@ describe('buildProvenanceMaterial', () => {
         expect(buildProvenanceMaterial(long).transitionsAvailable).toBe(9);
     });
 
+    it('balances the items between report-touching and report-free stretches', () => {
+        // Two separate threads of 8 charts each: one fully in the report, one
+        // fully intermediate. Four items must land 2 + 2 across them.
+        const thread = (prefix: string, inReport: boolean) =>
+            Array.from({ length: 8 }, (_, i) =>
+                chart(`${prefix}${i}`, i + 1, i === 0 ? null : `${prefix}${i - 1}`, inReport));
+        const charts = [...thread('r', true), ...thread('i', false)];
+        const mixed: TraceMaterial = {
+            sessionId: 's4', charts, skipped: [],
+            edges: charts.filter(c => c.parentChartId).map(c => ({ from: c.parentChartId!, to: c.chartId })),
+        };
+        for (const seed of [1, 20260814, 77, 4242]) {
+            const items = buildProvenanceMaterial(mixed, { seed }).items;
+            expect(items).toHaveLength(4);
+            expect(items.filter(i => i.touchesReport)).toHaveLength(2);
+        }
+    });
+
+    it('fills from the other bucket when a session has no report charts', () => {
+        // The default material has no report chart at all; the report half of
+        // the draw must cede its slots rather than shrink the run.
+        const m = buildProvenanceMaterial(material());
+        expect(m.items.length).toBeGreaterThan(0);
+        for (const item of m.items) expect(item.touchesReport).toBe(false);
+    });
+
     it('produces nothing rather than a two-option item when charts run out', () => {
         const thin: TraceMaterial = {
             sessionId: 's2',
@@ -112,15 +139,17 @@ describe('buildProvenanceAnswer', () => {
     const response = (correct: boolean): ProvenanceResponse => ({
         itemId: 'i', fromChartId: 'a', fromNum: 1, answerChartId: 'b', answerNum: 2,
         pickedChartId: correct ? 'b' : 'c', pickedNum: correct ? 2 : 3, correct,
-        optionNums: [2, 3, 4], rationale: 'wanted the split by year',
+        touchesReport: false,
+        optionNums: [2, 3, 4], confidence: 70, confidenceSet: true,
         actualPrompt: 'prompt b', promptSource: 'user', seconds: 9,
     });
 
-    it('scores the picks and keeps every rationale', () => {
+    it('scores the picks and keeps every response', () => {
         const a = buildProvenanceAnswer([response(true), response(false), response(true)], 42);
         expect(a.form).toBe('provenance');
         expect(a.score).toEqual({ correct: 2, total: 3 });
         expect(a.seconds).toBe(42);
-        expect(a.responses.every(r => r.rationale.length > 0)).toBe(true);
+        // The confidence travels with the pick — calibration is read offline.
+        expect(a.responses.every(r => r.confidence === 70)).toBe(true);
     });
 });

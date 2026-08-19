@@ -1,0 +1,366 @@
+version: '1.1'
+created_at: '2026-07-01T22:56:41.074348+00:00'
+updated_at: '2026-07-01T23:15:29.241941+00:00'
+tables:
+  faa_wildlife_strikes:
+    source_type: data_loader
+    filename: faa_wildlife_strikes.parquet
+    file_type: parquet
+    created_at: '2026-07-01T22:56:41.404592+00:00'
+    content_hash: bec0905b0b4455d5c6c7c20d1fb049b1
+    file_size: 774350
+    loader_type: SampleDatasetsLoader
+    loader_params: {}
+    source_table: FAA Wildlife Strikes
+    import_options:
+      size: 2000000
+    last_synced: '2026-07-01T22:56:41.404592+00:00'
+    row_count: 21948
+    columns:
+    - name: INDEX_NR
+      dtype: integer
+    - name: INCIDENT_DATE
+      dtype: string
+    - name: TIME_OF_DAY
+      dtype: string
+    - name: AIRPORT
+      dtype: string
+    - name: LATITUDE
+      dtype: string
+    - name: LONGITUDE
+      dtype: string
+    - name: STATE
+      dtype: string
+    - name: OPID
+      dtype: string
+    - name: OPERATOR
+      dtype: string
+    - name: AIRCRAFT
+      dtype: string
+    - name: AC_CLASS
+      dtype: string
+    - name: AC_MASS
+      dtype: string
+    - name: TYPE_ENG
+      dtype: string
+    - name: NUM_ENGS
+      dtype: number
+    - name: ENG_1_POS
+      dtype: string
+    - name: ENG_2_POS
+      dtype: string
+    - name: ENG_3_POS
+      dtype: string
+    - name: ENG_4_POS
+      dtype: string
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: HEIGHT
+      dtype: number
+    - name: SPEED
+      dtype: number
+    - name: DISTANCE
+      dtype: number
+    - name: SKY
+      dtype: string
+    - name: PRECIPITATION
+      dtype: string
+    - name: DAMAGE_LEVEL
+      dtype: string
+    - name: STR_RAD
+      dtype: integer
+    - name: DAM_RAD
+      dtype: integer
+    - name: STR_WINDSHLD
+      dtype: integer
+    - name: DAM_WINDSHLD
+      dtype: integer
+    - name: STR_NOSE
+      dtype: integer
+    - name: DAM_NOSE
+      dtype: integer
+    - name: STR_ENG1
+      dtype: integer
+    - name: DAM_ENG1
+      dtype: integer
+    - name: ING_ENG1
+      dtype: integer
+    - name: STR_ENG2
+      dtype: integer
+    - name: DAM_ENG2
+      dtype: integer
+    - name: ING_ENG2
+      dtype: integer
+    - name: STR_ENG3
+      dtype: integer
+    - name: DAM_ENG3
+      dtype: integer
+    - name: ING_ENG3
+      dtype: integer
+    - name: STR_ENG4
+      dtype: integer
+    - name: DAM_ENG4
+      dtype: integer
+    - name: ING_ENG4
+      dtype: integer
+    - name: STR_PROP
+      dtype: integer
+    - name: DAM_PROP
+      dtype: integer
+    - name: STR_WING_ROT
+      dtype: integer
+    - name: DAM_WING_ROT
+      dtype: integer
+    - name: STR_FUSE
+      dtype: integer
+    - name: DAM_FUSE
+      dtype: integer
+    - name: STR_LG
+      dtype: integer
+    - name: DAM_LG
+      dtype: integer
+    - name: STR_TAIL
+      dtype: integer
+    - name: DAM_TAIL
+      dtype: integer
+    - name: STR_LGHTS
+      dtype: integer
+    - name: DAM_LGHTS
+      dtype: integer
+    - name: STR_OTHER
+      dtype: integer
+    - name: DAM_OTHER
+      dtype: integer
+    - name: SPECIES_ID
+      dtype: string
+    - name: SPECIES
+      dtype: string
+    - name: NUM_STRUCK
+      dtype: string
+    - name: SIZE
+      dtype: string
+    description: FAA reports of wildlife strikes on aircraft (mostly birds) that caused
+      damage, with airport, location, operator, aircraft, flight phase, weather, damage
+      severity (Minor / Substantial), affected components, and species.
+  d_strikes_by_phase:
+    source_type: data_loader
+    filename: d_strikes_by_phase.parquet
+    file_type: parquet
+    created_at: '2026-07-01T22:58:53.317393+00:00'
+    content_hash: a3b9bc642c0502237aa6f6e2dd9286fd
+    file_size: 2461
+    last_synced: '2026-07-01T22:58:53.317393+00:00'
+    row_count: 12
+    columns:
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: strike_count
+      dtype: integer
+  d_normalized_strike_rate_by_phase:
+    source_type: data_loader
+    filename: d_normalized_strike_rate_by_phase.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:01:14.906842+00:00'
+    content_hash: ab51306cff6024624b2c3772d196f588
+    file_size: 4464
+    last_synced: '2026-07-01T23:01:14.906842+00:00'
+    row_count: 11
+    columns:
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: strike_count
+      dtype: integer
+    - name: assumed_minutes_in_phase
+      dtype: number
+    - name: strikes_per_phase_hour
+      dtype: number
+  d_output_df:
+    source_type: data_loader
+    filename: d_output_df.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:03:40.189142+00:00'
+    content_hash: 5f7f9e1adb3e4b02409c95b8ac236d00
+    file_size: 3386
+    last_synced: '2026-07-01T23:03:40.189142+00:00'
+    row_count: 20
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: strike_reports
+      dtype: integer
+  d_d_airports_ex_unknown:
+    source_type: data_loader
+    filename: d_d_airports_ex_unknown.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:04:19.092098+00:00'
+    content_hash: 7f2b0de6a909747bbbbf75213bd405af
+    file_size: 3385
+    last_synced: '2026-07-01T23:04:19.092098+00:00'
+    row_count: 20
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: strike_reports
+      dtype: integer
+  d_output_df_2:
+    source_type: data_loader
+    filename: d_output_df_2.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:06:42.853364+00:00'
+    content_hash: 3d004e9e16aa21ef46b765c76755af01
+    file_size: 5563
+    last_synced: '2026-07-01T23:06:42.853364+00:00'
+    row_count: 20
+    columns:
+    - name: AIRCRAFT
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: total_damage_score
+      dtype: number
+    - name: avg_damage_per_incident
+      dtype: number
+    - name: damaging_incident_rate
+      dtype: number
+  d_strikes_and_damage_over_time:
+    source_type: data_loader
+    filename: d_strikes_and_damage_over_time.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:08:09.809708+00:00'
+    content_hash: bcc4164b05f4c6a15165659af294c4bb
+    file_size: 3858
+    last_synced: '2026-07-01T23:08:09.809708+00:00'
+    row_count: 111
+    columns:
+    - name: year
+      dtype: integer
+    - name: metric
+      dtype: string
+    - name: value
+      dtype: number
+  d_serious_damage_by_height:
+    source_type: data_loader
+    filename: d_serious_damage_by_height.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:08:18.361451+00:00'
+    content_hash: d56f6b68d7002df29502b514977cf94e
+    file_size: 3895
+    last_synced: '2026-07-01T23:08:18.361451+00:00'
+    row_count: 8
+    columns:
+    - name: height_bin
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: any_damage_rate
+      dtype: number
+    - name: serious_damage_rate
+      dtype: number
+  d_damage_rate_by_time_of_day:
+    source_type: data_loader
+    filename: d_damage_rate_by_time_of_day.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:08:23.828557+00:00'
+    content_hash: 5af7fd89dd5cba51186af92bf9cfceeb
+    file_size: 3764
+    last_synced: '2026-07-01T23:08:23.828557+00:00'
+    row_count: 5
+    columns:
+    - name: time_of_day
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: any_damage_rate
+      dtype: number
+    - name: serious_damage_rate
+      dtype: number
+  d_species_serious_damage:
+    source_type: data_loader
+    filename: d_species_serious_damage.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:11:41.161886+00:00'
+    content_hash: 440d1ec24816550722ed3268eecc2005
+    file_size: 4996
+    last_synced: '2026-07-01T23:11:41.161886+00:00'
+    row_count: 25
+    columns:
+    - name: SPECIES
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: serious_incidents
+      dtype: integer
+    - name: serious_damage_rate
+      dtype: number
+  d_phase_serious:
+    source_type: data_loader
+    filename: d_phase_serious.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:11:46.609124+00:00'
+    content_hash: abe29308aa0684cfdc16ce2a085bf820
+    file_size: 4248
+    last_synced: '2026-07-01T23:11:46.609124+00:00'
+    row_count: 7
+    columns:
+    - name: PHASE_OF_FLIGHT
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: serious_incidents
+      dtype: integer
+    - name: serious_damage_rate
+      dtype: number
+  d_engine_serious:
+    source_type: data_loader
+    filename: d_engine_serious.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:11:51.067013+00:00'
+    content_hash: c39f96daa25266c38a5b42f1a12c05ca
+    file_size: 4140
+    last_synced: '2026-07-01T23:11:51.067013+00:00'
+    row_count: 5
+    columns:
+    - name: TYPE_ENG
+      dtype: string
+    - name: incidents
+      dtype: integer
+    - name: serious_incidents
+      dtype: integer
+    - name: serious_damage_rate
+      dtype: number
+  d_output_df_3:
+    source_type: data_loader
+    filename: d_output_df_3.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:15:09.265206+00:00'
+    content_hash: 706d3fe734473c831c11818d22f9e66e
+    file_size: 4895
+    last_synced: '2026-07-01T23:15:09.265206+00:00'
+    row_count: 25
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: deer_strike_rate_pct
+      dtype: number
+    - name: deer_incidents
+      dtype: integer
+    - name: total_incidents
+      dtype: integer
+  d_output_df_4:
+    source_type: data_loader
+    filename: d_output_df_4.parquet
+    file_type: parquet
+    created_at: '2026-07-01T23:15:29.211189+00:00'
+    content_hash: 5acb6dd60c02eedc0e8f9a522f428f5c
+    file_size: 4865
+    last_synced: '2026-07-01T23:15:29.211189+00:00'
+    row_count: 18
+    columns:
+    - name: AIRPORT
+      dtype: string
+    - name: deer_strike_rate_pct
+      dtype: number
+    - name: deer_incidents
+      dtype: integer
+    - name: total_incidents
+      dtype: integer

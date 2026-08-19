@@ -8,56 +8,6 @@ Sample datasets configuration for Data Formulator.
 EXAMPLE_DATASETS = [
     {
         'source': 'vegadatasets',
-        'name': 'Gapminder',
-        'description': 'A simplified dataset of global development indicators tracking population, and life expectancy across countries over time.',
-        'tables': [
-            {
-                "format": 'json',
-                "url": 'https://raw.githubusercontent.com/vega/vega-datasets/refs/heads/main/data/gapminder.json',
-                "sample": [{"year": 1955, "country": "Afghanistan", "cluster": 0, "pop": 7971931, "life_expect": 43.88, "fertility": 7.42}, {"year": 1960, "country": "Afghanistan", "cluster": 0, "pop": 8622466, "life_expect": 45.03, "fertility": 7.38}, {"year": 1965, "country": "Afghanistan", "cluster": 0, "pop": 9565147, "life_expect": 46.13, "fertility": 7.35}, {"year": 1970, "country": "Afghanistan", "cluster": 0, "pop": 10752971, "life_expect": 47.08, "fertility": 7.4}, {"year": 1975, "country": "Afghanistan", "cluster": 0, "pop": 12157386, "life_expect": 47.55, "fertility": 7.54}, {"year": 1980, "country": "Afghanistan", "cluster": 0, "pop": 12486631, "life_expect": 43.68, "fertility": 7.59}, {"year": 1985, "country": "Afghanistan", "cluster": 0, "pop": 10512221, "life_expect": 42.03, "fertility": 7.52}, {"year": 1990, "country": "Afghanistan", "cluster": 0, "pop": 10694796, "life_expect": 53.83, "fertility": 7.57}, {"year": 1995, "country": "Afghanistan", "cluster": 0, "pop": 16418912, "life_expect": 54.33, "fertility": 7.71}, {"year": 2000, "country": "Afghanistan", "cluster": 0, "pop": 19542982, "life_expect": 54.73, "fertility": 7.53}, {"year": 2005, "country": "Afghanistan", "cluster": 0, "pop": 24411191, "life_expect": 57.63, "fertility": 6.91}, {"year": 1955, "country": "Argentina", "cluster": 3, "pop": 18700686, "life_expect": 64.51, "fertility": 3.14}, {"year": 1960, "country": "Argentina", "cluster": 3, "pop": 20349744, "life_expect": 65.26, "fertility": 3.08}, {"year": 1965, "country": "Argentina", "cluster": 3, "pop": 22053661, "life_expect": 66.13, "fertility": 3.06}, {"year": 1970, "country": "Argentina", "cluster": 3, "pop": 23842803, "life_expect": 66.13, "fertility": 3.09}, {"year": 1975, "country": "Argentina", "cluster": 3, "pop": 25875558, "life_expect": 68.03, "fertility": 3.3}, {"year": 1980, "country": "Argentina", "cluster": 3, "pop": 28024803, "life_expect": 70.23, "fertility": 3.3}, {"year": 1985, "country": "Argentina", "cluster": 3, "pop": 30287112, "life_expect": 71.73, "fertility": 3.1}, {"year": 1990, "country": "Argentina", "cluster": 3, "pop": 32637657, "life_expect": 72.47, "fertility": 3.03}, {"year": 1995, "country": "Argentina", "cluster": 3, "pop": 34946110, "life_expect": 73.44, "fertility": 2.86}, {"year": 2000, "country": "Argentina", "cluster": 3, "pop": 37070774, "life_expect": 74.22, "fertility": 2.59}]
-            }
-        ]
-    },
-    {
-        'source': 'vegadatasets',
-        'name': 'US Income',
-        'description': 'US income distribution data showing how household incomes are spread across different brackets and states.',
-        'tables': [
-            {
-                "format": 'json',
-                "url": 'https://raw.githubusercontent.com/vega/vega-datasets/refs/heads/main/data/income.json',
-                "sample": [{"name":"Alabama","region":"south","id":1,"pct":0.102,"total":1837292,"group":"<10000"},{"name":"Alabama","region":"south","id":1,"pct":0.072,"total":1837292,"group":"10000 to 14999"},{"name":"Alabama","region":"south","id":1,"pct":0.13,"total":1837292,"group":"15000 to 24999"},{"name":"Alabama","region":"south","id":1,"pct":0.115,"total":1837292,"group":"25000 to 34999"},{"name":"Alabama","region":"south","id":1,"pct":0.143,"total":1837292,"group":"35000 to 49999"},{"name":"Alabama","region":"south","id":1,"pct":0.108,"total":1837292,"group":"75000 to 99999"}]
-            }
-        ]
-    },
-    {
-        'source': 'vegadatasets',
-        'name': 'Disasters',
-        'description': 'Historical records of natural disasters worldwide, including fatalities, types, and locations.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/vega/vega-datasets/refs/heads/main/data/disasters.csv',
-                "sample": '''Entity,Year,Deaths
-All natural disasters,1900,1267360
-All natural disasters,1901,200018
-All natural disasters,1902,46037
-All natural disasters,1903,6506
-All natural disasters,1905,22758
-All natural disasters,1906,42970
-All natural disasters,1907,1325641
-All natural disasters,1908,75033
-All natural disasters,1909,1511524
-All natural disasters,1910,148233
-All natural disasters,1911,102408
-All natural disasters,1912,52093
-All natural disasters,1913,882
-All natural disasters,1914,289'''
-            }
-        ]
-    },
-    {
-        'source': 'vegadatasets',
         'name': 'Movies',
         'description': 'Box office performance, budgets, and ratings for films across different genres and time periods.',
         'tables': [
@@ -81,18 +31,6 @@ All natural disasters,1914,289'''
         ]
     },
     {
-        'source': 'vegadatasets',
-        'name': 'Unemployment',
-        'description': 'Unemployment rates across different economic sectors and industries over time.',
-        'tables': [
-            {
-                "format": 'json',
-                "url": 'https://raw.githubusercontent.com/vega/vega-datasets/refs/heads/main/data/unemployment-across-industries.json',
-                "sample": [{"series":"Government","year":2000,"month":1,"count":430,"rate":2.1,"date":"2000-01-01T08:00:00.000Z"},{"series":"Government","year":2000,"month":2,"count":409,"rate":2,"date":"2000-02-01T08:00:00.000Z"},{"series":"Government","year":2000,"month":3,"count":311,"rate":1.5,"date":"2000-03-01T08:00:00.000Z"},{"series":"Government","year":2000,"month":4,"count":269,"rate":1.3,"date":"2000-04-01T08:00:00.000Z"},{"series":"Government","year":2000,"month":5,"count":370,"rate":1.9,"date":"2000-05-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":6,"count":603,"rate":3.1,"date":"2000-06-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":7,"count":545,"rate":2.9,"date":"2000-07-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":8,"count":583,"rate":3.1,"date":"2000-08-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":9,"count":408,"rate":2.1,"date":"2000-09-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":10,"count":391,"rate":2,"date":"2000-10-01T07:00:00.000Z"},{"series":"Government","year":2000,"month":11,"count":384,"rate":1.9,"date":"2000-11-01T08:00:00.000Z"},{"series":"Government","year":2000,"month":12,"count":365,"rate":1.8,"date":"2000-12-01T08:00:00.000Z"},{"series":"Government","year":2001,"month":1,"count":463,"rate":2.3,"date":"2001-01-01T08:00:00.000Z"},{"series":"Government","year":2001,"month":2,"count":298,"rate":1.5,"date":"2001-02-01T08:00:00.000Z"},{"series":"Government","year":2001,"month":3,"count":355,"rate":1.8,"date":"2001-03-01T08:00:00.000Z"},{"series":"Government","year":2001,"month":4,"count":369,"rate":1.9,"date":"2001-04-01T08:00:00.000Z"},{"series":"Government","year":2001,"month":5,"count":361,"rate":1.8,"date":"2001-05-01T07:00:00.000Z"},{"series":"Government","year":2001,"month":6,"count":525,"rate":2.7,"date":"2001-06-01T07:00:00.000Z"},{"series":"Government","year":2001,"month":7,"count":548,"rate":2.8,"date":"2001-07-01T07:00:00.000Z"},{"series":"Government","year":2001,"month":8,"count":540,"rate":2.8,"date":"2001-08-01T07:00:00.000Z"}]
-            }
-        ]
-    },
-    {
         'source': 'tidytuesday',
         'name': 'College Majors',
         'description': 'A dataset of college majors and their related fields',
@@ -112,28 +50,6 @@ All natural disasters,1914,289'''
 9,2414,MECHANICAL ENGINEERING,91227,80320,10907,Engineering,0.119558903,1029,76442,71298,13101,54639,4650,0.057342278,60000,48000,70000,52844,16384,3253
 10,2408,ELECTRICAL ENGINEERING,81527,65511,16016,Engineering,0.196450256,631,61928,55450,12695,41413,3895,0.059173845,60000,45000,72000,45829,10874,3170
 11,2407,COMPUTER ENGINEERING,41542,33258,8284,Engineering,0.199412643,399,32506,30315,5146,23621,2275,0.065409275,60000,45000,75000,23694,5721,980'''
-            }
-        ]
-    },{
-        'source': 'bls.gov',
-        'name': 'Consumer Price Index',
-        'description': 'Average price of consumer goods and services in the United States',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://gist.githubusercontent.com/Chenglong-MS/75827bc7daac7ba407863f499c494b37/raw/95af6fd0cc978932af9f6cacc7cd3c0c01d4dffa/average-price-data.csv',
-                "sample": '''Month,"Bananas per lb.","Oranges Navel per lb.","Bread white pan per lb.","Tomatoes field grown per lb.","Chicken fresh whole per lb.",Electricity per KWH,"Eggs grade A large per doz.","Gasoline unleaded regular per gallon","Ground chuck 100% beef per lb.",Utility (piped) gas per therm,"Milk fresh whole fortified per gal."
-2005-08-01,0.487,,1.06,1.416,1.042,0.105,1.166,2.506,2.502,1.189,3.136
-2005-09-01,0.485,1.363,1.052,1.429,1.056,0.106,1.279,2.927,2.535,1.324,3.133
-2005-10-01,0.491,1.388,1.043,1.547,1.062,0.102,1.264,2.785,2.564,1.512,3.171
-2005-11-01,0.48,1.172,1.055,1.574,1.059,0.102,1.279,2.343,2.568,1.548,3.211
-2005-12-01,0.482,0.885,1.046,1.848,1.061,0.102,1.35,2.186,2.606,1.498,3.241
-2006-01-01,0.49,0.837,1.046,2.162,1.062,0.108,1.449,2.315,2.607,1.531,3.197
-2006-02-01,0.508,0.915,1.029,1.91,1.045,0.108,1.328,2.31,2.556,1.402,3.224
-2006-03-01,0.508,0.888,1.04,1.649,1.047,0.109,1.302,2.401,2.568,1.335,3.161
-2006-04-01,0.508,0.876,1.072,1.573,1.054,0.109,1.283,2.757,2.599,1.278,3.123
-2006-05-01,0.514,0.99,1.086,1.543,1.034,0.11,1.206,2.947,2.508,1.263,3.066
-2006-06-01,0.511,1.119,1.074,1.457,1.055,0.118,1.242,2.917,2.543,1.21,3.001''',
             }
         ]
     },
@@ -165,40 +81,8 @@ All natural disasters,1914,289'''
 1990-10-15,gasoline,regular,conventional,1.339'''
             }
         ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Netflix',
-        'description': 'What movies and shows are we watching on Netflix?',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2025/2025-07-29/movies.csv',
-                "sample": '''source,report,title,available_globally,release_date,hours_viewed,runtime,views
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Back in Action,Yes,2025-01-17,313000000,1H 54M 0S,164700000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,STRAW,Yes,2025-06-06,185200000,1H 48M 0S,102900000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,The Life List,Yes,2025-03-28,198900000,2H 5M 0S,95500000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Exterritorial,Yes,2025-04-30,159000000,1H 49M 0S,87500000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Havoc,Yes,2025-04-25,154900000,1H 47M 0S,86900000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,The Secret Life of Pets 2,No,NA,106800000,1H 26M 0S,74500000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,The Electric State,Yes,2025-03-14,158200000,2H 8M 0S,74200000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Counterattack // Contraataque,Yes,2025-02-28,101000000,1H 25M 0S,71300000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Ad Vitam,Yes,2025-01-10,114000000,1H 38M 0S,69800000''',
-            },
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2025/2025-07-29/shows.csv',
-                "sample": '''source,report,title,available_globally,release_date,hours_viewed,runtime,views
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Adolescence: Limited Series,Yes,2025-03-13,555100000,3H 50M 0S,144800000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Squid Game: Season 2 // 오징어 게임: 시즌 2,Yes,2024-12-26,840300000,7H 10M 0S,117300000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Squid Game: Season 3 // 오징어 게임: 시즌 3,Yes,2025-06-27,438600000,6H 8M 0S,71500000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Zero Day: Limited Series,Yes,2025-02-20,315800000,5H 9M 0S,61300000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Missing You: Limited Series,Yes,2025-01-01,218600000,3H 46M 0S,58000000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,American Murder: Gabby Petito: Season 1,Yes,2025-02-17,120600000,2H 9M 0S,56100000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Ms. Rachel: Season 1,Yes,NA,162100000,3H 2M 0S,53400000
-1_What_We_Watched_A_Netflix_Engagement_Report_2025Jan-Jun,2025Jan-Jun,Sirens: Limited Series,Yes,2025-05-22,252300000,4H 44M 0S,53300000'''
-            }
-        ],
-    }, {
+    },
+    {
         'source': 'tidytuesday',
         'name': 'Billboard Hot 100',
         'description': 'Data about every song to ever top the Billboard Hot 100 between August 4, 1958 and January 11, 2025. It was compiled by Chris Dalla Riva as he wrote the book Uncharted Territory: What Numbers Tell Us about the Biggest Hit Songs and Ourselves.',
@@ -220,204 +104,11 @@ Stagger Lee,Lloyd Price,1959-02-02T00:00:00Z,4,0,6,6,9,7,2,ABC-Paramount,ABC,Roc
 Venus,Frankie Avalon,1959-03-09T00:00:00Z,5,0,3,2,2,2.3333333333333335,0.6666666666666666,Chancellor,ABC,Pop,Vocal,Pop,Vocal,1,NA,0,0,NA,0,United States,18,1,1,0,Ed Marshall,Ed Marshall,1,1,0,0,Peter DeAngelis;Bob Marcucci,1,1,0,0,0,4/4,Bb,Bb,115,48,56,75,-10,73,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,NA,D1,0,142,0,23,16,0,0,0,0,0,0,0,0,Venus.Venus.Venus if you will.Please send a little girl for me to thrill.A girl who wants my kisses and my arms.A girl with all the charms of you.Venus make her fair.A lovely girl with sunlight in her hair.And take the brightest stars up in the skies.And place them in her eyes for me.Venus goddess of love that you are.Surely the things I ask.Can't be too great a task.Venus if you do.I promise that I always will be true.I'll give her all the love I have to give.As long as we both shall live.Venus goddess of love that you are.Surely the things I ask.Can't be too great a task.Venus if you do.I promise that I always will be true.I'll give her all the love I have to give.As long as we both shall live.Venus.Venus.Make my wish come true.,Longing for Love,0,0,0,0,0,NA,0,NA,0,NA,0,0,NA,0,Artist Photograph'''
             }
         ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Patient Risk Profiles',
-        'description': "This dataset contains 100 simulated patient's medical history features and the predicted 1-year risk of 14 outcomes based on each patient's medical history features. The predictions used real logistic regression models developed on a large real world healthcare dataset.",
-        'tables': [
-            {
-                "format": 'csv',
-                'url': 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2023/2023-10-24/patient_risk_profiles.csv',
-                'sample': '''personId,age group:  10 -  14,age group:  15 -  19,age group:  20 -  24,age group:  65 -  69,age group:  40 -  44,age group:  45 -  49,age group:  55 -  59,age group:  85 -  89,age group:  75 -  79,age group:   5 -   9,age group:  25 -  29,age group:   0 -   4,age group:  70 -  74,age group:  50 -  54,age group:  60 -  64,age group:  35 -  39,age group:  30 -  34,age group:  80 -  84,age group:  90 -  94,Sex = FEMALE,Sex = MALE,Acetaminophen exposures in prior year,Occurrence of Alcoholism in prior year,Anemia in prior year,Angina events in prior year,ANTIEPILEPTICS in prior year,Occurrence of Anxiety in prior year,Osteoarthritis in prior year,Aspirin exposures in prior year,Occurrence of Asthma in prior year,"Atrial Fibrillation, incident in prior year",HORMONAL CONTRACEPTIVES in prior year,Any cancer (excl. prostate cancer and benign cancer) in prior year,Acute Kidney Injury (AKI) in prior year,Chronic kidney disease or end stage renal disease in prior year,Heart failure in prior year,Chronic obstructive pulmonary disease (COPD) in prior year,Coronary artery disease (CAD) in prior year,"Major depressive disorder, with NO occurrence of certain psychiatric disorder in prior year",Type 1 diabetes and no prior specific non-T1DM diabetes in prior year,"Type 2 Diabetes Mellitus (DM), with no type 1 or secondary DM in prior year",Deep Vein Thrombosis (DVT) in prior year,Dyspnea in prior year,Edema in prior year,Gastroesophageal reflux disease in prior year,Acute gastrointestinal (GI) bleeding in prior year,Heart valve disorder in prior year,Chronic hepatitis in prior year,Hyperlipidemia in prior year,Hypertension in prior year,Hypothyroidism in prior year,Inflammatory Bowel Disease in prior year,Low back pain in prior year,Occurrence of neuropathy in prior year,Obesity in prior year,Opioids in prior year,Osteoporosis in prior year,Peripheral vascular disease in prior year,Pneumonia in prior year,Psychotic disorder in prior year,Acute Respiratory failure in prior year,Rheumatoid Arthritis in prior year,Seizure in prior year,Sepsis in prior year,Skin ulcer in prior year,Sleep apnea in prior year,Smoking in prior year,STEROIDS in prior year,Hemorrhagic stroke in an inpatient setting in prior year,Non-hemorrhagic Stroke in an inpatient setting in prior year,Urinary tract infectious disease in prior year,Antibiotics Carbapenems in prior year,Antibiotics Aminoglycosides in prior year,Antibiotics Cephalosporins in prior year,Antibiotics Fluoroquinolones in prior year,Antibiotics Glycopeptides and lipoglycopeptides in prior year,Antibiotics Macrolides in prior year,Antibiotics Monobactams in prior year,Antibiotics Oxazolidinones in prior year,Antibiotics Penicillins in prior year,Antibiotics Polypeptides in prior year,Antibiotics Rifamycins in prior year,Antibiotics Sulfonamides in prior year,Antibiotics Streptogramins in prior year,Antibiotics Tetracyclines in prior year,predicted risk of Pulmonary Embolism,"predicted risk of Sudden Hearing Loss, No congenital anomaly or middle or inner ear conditions",predicted risk of Restless Leg Syndrome,"predicted risk of Sudden Vision Loss, with no eye pathology causes",predicted risk of Muscle weakness or injury,predicted risk of Ankylosing Spondylitis,predicted risk of Autoimmune hepatitis,predicted risk of Multiple Sclerosis,"predicted risk of Acute pancreatitis, with No chronic or hereditary or common causes of pancreatitis",predicted risk of Ulcerative colitis,predicted risk of Migraine,predicted risk of Dementia,predicted risk of  Treatment resistant depression (TRD),"predicted risk of Parkinson's disease, inpatient or with 2nd diagnosis"
-1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1,0,1,0,1,0,0,0,0,0,0,0,6.99575517946153E-06,0.00118799448452361,0.00113521200511238,0.000111508301767788,0.0188317440572134,7.58027636940557E-05,7.96570781215902E-05,0.000468549568476105,0.00012436069695809,0.000230991182800591,0.00654426768381862,7.30568202867115E-05,0.000393828939554244,4.04339639325133E-05
-2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,1,0,0,0,0,0,1,0,1,1,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0.00441422061324454,0.0358259270965809,0.00628615304402316,0.00160728545057666,0.179579353683346,0.000501552796659848,7.88137732912271E-06,0.000421360646091043,0.000816636102151383,0.00156719415098486,0.0243635943152779,0.283879214688442,0.0138886132877911,0.0195526139594774
-3,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0.00246179423902851,0.00352409954417798,0.00123963239201273,0.000145891713126901,0.0223178022257278,0.000461715423994332,2.28874258509341E-05,0.000527096330768595,0.000416669691599939,0.00127466041950367,0.00542984527203618,0.00128155335881044,0.00101738679514043,0.000113499343433664
-4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,1,0,0,0,1,1,1,0.00267000861643238,0.00247336321987715,0.000441054921283152,0.000152773704749624,0.0220617756570553,0.000481510930093349,3.43010599599209E-05,0.000910960176825296,0.000235986486697154,0.00638625829979481,0.006636578736903,0.000706627519596284,0.00226615949859508,4.10984109899065E-05
-5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,1,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1,1,0,1,0,0,1,0,0,0,0,0,0,1,0,0.0206818512182543,0.0117893418676085,0.00427664772229725,0.000325865473878066,0.0633105390455467,0.0041153809531189,8.3473321779432E-05,0.00185928919073779,0.000699811142238753,0.0620649084463635,0.00468263807806029,0.0163716009191329,5.64951086173088E-05,0.00331195228607955
-6,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0.00455665231961284,0.0215984207477867,0.00178776442479255,0.000466726635059575,0.0389368132012184,0.000666036384000457,2.15545946607044E-05,0.000127202886974176,0.000858813148174222,0.0010155590042039,0.0100388811465988,0.0457689464750165,0.000659150042438028,0.00336552536596351
-7,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,1,1,0,0,0,0,1,0,0,1,0,1,1,1,0,1,0,0,1,0,1,1,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0,0,1,0,1,0,0,0,0.0186826613299857,0.0187010037764903,0.00212554337046552,0.000214068587596829,0.134144553239361,0.00108141814357676,0.00139509039790527,0.000744241842425037,0.000916803656046385,0.00637231340606943,0.0326189204574906,0.331324640121089,0.000314660993270718,0.00498660937569948
-'''
-            }
-        ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Life Expectancy',
-        'description': 'Across the world, people are living longer. In 1900, the average life expectancy of a newborn was 32 years. By 2021 this had more than doubled to 71 years. But where, when, how, and why has this dramatic change occurred? To understand it, we can look at data on life expectancy worldwide.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2023/2023-12-05/life_expectancy.csv',
-                'sample': '''Entity,Code,Year,LifeExpectancy
-Afghanistan,AFG,1950,27.7275
-Afghanistan,AFG,1951,27.9634
-Afghanistan,AFG,1952,28.4456
-Afghanistan,AFG,1953,28.9304
-Afghanistan,AFG,1954,29.2258
-Afghanistan,AFG,1955,29.9206
-Afghanistan,AFG,1956,30.4078
-Afghanistan,AFG,1957,30.9458
-'''
-            }, {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2023/2023-12-05/life_expectancy_different_ages.csv',
-                'sample': '''Entity,Code,Year,LifeExpectancy0,LifeExpectancy10,LifeExpectancy25,LifeExpectancy45,LifeExpectancy65,LifeExpectancy80
-Afghanistan,AFG,1950,27.7275,49.1459,54.4422,63.4225,73.4901,83.7259
-Afghanistan,AFG,1951,27.9634,49.2941,54.5644,63.500603,73.5289,83.7448
-Afghanistan,AFG,1952,28.4456,49.5822,54.7998,63.6476,73.6018,83.7796
-Afghanistan,AFG,1953,28.9304,49.8634,55.028603,63.788902,73.6706,83.8118
-Afghanistan,AFG,1954,29.2258,49.9306,55.1165,63.8481,73.7041,83.8334
-Afghanistan,AFG,1955,29.9206,50.4315,55.4902,64.0732,73.8087,83.876
-Afghanistan,AFG,1956,30.4078,50.7036,55.7131,64.2102,73.8755,83.9073
-Afghanistan,AFG,1957,30.9458,51.0233,55.9721,64.3705,73.9542,83.9434
-Afghanistan,AFG,1958,31.5066,51.3565,56.244698,64.5401,74.0384,83.9826'''
-            }, {
-                "format": 'csv',
-                'url': 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2023/2023-12-05/life_expectancy_female_male.csv',
-                'sample': '''Entity,Code,Year,LifeExpectancyDiffFM
-Afghanistan,AFG,1950,1.2619
-Afghanistan,AFG,1951,1.2706013
-Afghanistan,AFG,1952,1.2882996
-Afghanistan,AFG,1953,1.3066006
-Afghanistan,AFG,1954,1.2765007
-Afghanistan,AFG,1955,1.3688011
-Afghanistan,AFG,1956,1.4055996
-Afghanistan,AFG,1957,1.4146996
-Afghanistan,AFG,1958,1.3987999
-Afghanistan,AFG,1959,1.3992996
-Afghanistan,AFG,1960,1.4146004'''
-            }
-        ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'PhDs Awarded',
-        'description': 'The data comes from the NSF - where there are at least 72 different datasets if you wanted to approach the data from a different angle.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2019/2019-02-19/phd_by_field.csv',
-                'sample': '''broad_field,major_field,field,year,n_phds
-Life sciences,Agricultural sciences and natural resources,Agricultural economics,2008,111
-Life sciences,Agricultural sciences and natural resources,Agricultural and horticultural plant breeding,2008,28
-Life sciences,Agricultural sciences and natural resources,Agricultural animal breeding,2008,3
-Life sciences,Agricultural sciences and natural resources,Agronomy and crop science,2008,68
-Life sciences,Agricultural sciences and natural resources,Animal nutrition,2008,41
-Life sciences,Agricultural sciences and natural resources,"Animal science, poultry or avian",2008,18
-Life sciences,Agricultural sciences and natural resources,"Animal sciences, other",2008,77
-Life sciences,Agricultural sciences and natural resources,Environmental science,2008,182
-Life sciences,Agricultural sciences and natural resources,Fishing and fisheries sciences and management,2008,52
-Life sciences,Agricultural sciences and natural resources,Food science,2008,96
-Life sciences,Agricultural sciences and natural resources,"Food science and technology, other",2008,41
-Life sciences,Agricultural sciences and natural resources,Forest sciences and biology,2008,32
-Life sciences,Agricultural sciences and natural resources,"Forest management, forest resources management",2008,44
-Life sciences,Agricultural sciences and natural resources,"Forestry, other",2008,17
-Life sciences,Agricultural sciences and natural resources,Horticulture science,2008,50
-Life sciences,Agricultural sciences and natural resources,Natural resource and environmental policy,2008,NA
-'''
-            }
-        ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Nuclear Explosions',
-        'description': 'This dataset is from Stockholm International Peace Research Institute, by way of data is plural with credit to Jesus Castagnetto for sharing the dataset.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2019/2019-08-20/nuclear_explosions.csv',
-                'sample': '''date_long,year,id_no,country,region,source,latitude,longitude,magnitude_body,magnitude_surface,depth,yield_lower,yield_upper,purpose,name,type
-19450716,1945,45001,USA,ALAMOGORDO,DOE,32.54,-105.57,0,0,-0.1,21,21,WR,TRINITY,TOWER
-19450805,1945,45002,USA,HIROSHIMA,DOE,34.23,132.27,0,0,-0.6,15,15,COMBAT,LITTLEBOY,AIRDROP
-19450809,1945,45003,USA,NAGASAKI,DOE,32.45,129.52,0,0,-0.6,21,21,COMBAT,FATMAN,AIRDROP
-19460630,1946,46001,USA,BIKINI,DOE,11.35,165.2,0,0,-0.2,21,21,WE,ABLE,AIRDROP
-19460724,1946,46002,USA,BIKINI,DOE,11.35,165.2,0,0,0.03,21,21,WE,BAKER,UW
-19480414,1948,48001,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.08,37,37,WR,X-RAY,TOWER
-19480430,1948,48002,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.08,49,49,WR,YOKE,TOWER
-19480514,1948,48003,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.08,18,18,WR,ZEBRA,TOWER
-19490829,1949,49001,USSR,SEMI KAZAKH,DOE,48,76,0,0,0,22,22,WR,NA,SURFACE
-19510127,1951,51001,USA,NTS,DOE,37,-116,0,0,-0.35,1,1,WR,ABLE,AIRDROP
-19510128,1951,51002,USA,NTS,DOE,37,-116,0,0,-0.35,8,8,WR,BAKER,AIRDROP
-19510201,1951,51003,USA,NTS,DOE,37,-116,0,0,-0.35,1,1,WR,EASY,AIRDROP
-19510202,1951,51004,USA,NTS,DOE,37,-116,0,0,-0.4,8,8,WR,BAKER2,AIRDROP
-19510206,1951,51005,USA,NTS,DOE,37,-116,0,0,-0.5,22,22,WR,FOX,AIRDROP
-19510407,1951,51006,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.1,81,81,WR,DOG,TOWER
-19510420,1951,51007,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.1,47,47,WR,EASY,TOWER
-19510508,1951,51008,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.07,225,225,WR,GEORGE,TOWER
-19510524,1951,51009,USA,ENEWETAK,DOE,11.3,162.15,0,0,-0.07,45.5,45.5,WR,ITEM,TOWER'''
-            }
-        ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Nobel Laureate',
-        'description': '"The Nobel Prize is a set of annual international awards bestowed in several categories by Swedish and Norwegian institutions in recognition of academic, cultural, or scientific advances." - Wikipedia.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2019/2019-05-14/nobel_winners.csv',
-                'sample': '''prize_year,category,prize,motivation,prize_share,laureate_id,laureate_type,full_name,birth_date,birth_city,birth_country,gender,organization_name,organization_city,organization_country,death_date,death_city,death_country
-1901,Chemistry,The Nobel Prize in Chemistry 1901,"""in recognition of the extraordinary services he has rendered by the discovery of the laws of chemical dynamics and osmotic pressure in solutions""",1/1,160,Individual,Jacobus Henricus van 't Hoff,1852-08-30,Rotterdam,Netherlands,Male,Berlin University,Berlin,Germany,1911-03-01,Berlin,Germany
-1901,Literature,The Nobel Prize in Literature 1901,"""in special recognition of his poetic composition, which gives evidence of lofty idealism, artistic perfection and a rare combination of the qualities of both heart and intellect""",1/1,569,Individual,Sully Prudhomme,1839-03-16,Paris,France,Male,NA,NA,NA,1907-09-07,Châtenay,France
-1901,Medicine,The Nobel Prize in Physiology or Medicine 1901,"""for his work on serum therapy, especially its application against diphtheria, by which he has opened a new road in the domain of medical science and thereby placed in the hands of the physician a victorious weapon against illness and deaths""",1/1,293,Individual,Emil Adolf von Behring,1854-03-15,Hansdorf (Lawice),Prussia (Poland),Male,Marburg University,Marburg,Germany,1917-03-31,Marburg,Germany
-1901,Peace,The Nobel Peace Prize 1901,NA,1/2,462,Individual,Jean Henry Dunant,1828-05-08,Geneva,Switzerland,Male,NA,NA,NA,1910-10-30,Heiden,Switzerland
-1901,Peace,The Nobel Peace Prize 1901,NA,1/2,463,Individual,Frédéric Passy,1822-05-20,Paris,France,Male,NA,NA,NA,1912-06-12,Paris,France
-1901,Physics,The Nobel Prize in Physics 1901,"""in recognition of the extraordinary services he has rendered by the discovery of the remarkable rays subsequently named after him""",1/1,1,Individual,Wilhelm Conrad Röntgen,1845-03-27,Lennep (Remscheid),Prussia (Germany),Male,Munich University,Munich,Germany,1923-02-10,Munich,Germany
-1902,Chemistry,The Nobel Prize in Chemistry 1902,"""in recognition of the extraordinary services he has rendered by his work on sugar and purine syntheses""",1/1,161,Individual,Hermann Emil Fischer,1852-10-09,Euskirchen,Prussia (Germany),Male,Berlin University,Berlin,Germany,1919-07-15,Berlin,Germany
-1902,Literature,The Nobel Prize in Literature 1902,"""the greatest living master of the art of historical writing, with special reference to his monumental work, <I>A history of Rome</I>""",1/1,571,Individual,Christian Matthias Theodor Mommsen,1817-11-30,Garding,Schleswig (Germany),Male,NA,NA,NA,1903-11-01,Charlottenburg,Germany
-1902,Medicine,The Nobel Prize in Physiology or Medicine 1902,"""for his work on malaria, by which he has shown how it enters the organism and thereby has laid the foundation for successful research on this disease and methods of combating it""",1/1,294,Individual,Ronald Ross,1857-05-13,Almora,India,Male,University College,Liverpool,United Kingdom,1932-09-16,Putney Heath,United Kingdom
-1902,Peace,The Nobel Peace Prize 1902,NA,1/2,464,Individual,Élie Ducommun,1833-02-19,Geneva,Switzerland,Male,NA,NA,NA,1906-12-07,Bern,Switzerland
-1902,Peace,The Nobel Peace Prize 1902,NA,1/2,465,Individual,Charles Albert Gobat,1843-05-21,Tramelan,Switzerland,Male,NA,NA,NA,1914-03-16,Bern,Switzerland
-1902,Physics,The Nobel Prize in Physics 1902,"""in recognition of the extraordinary service they rendered by their researches into the influence of magnetism upon radiation phenomena""",1/2,2,Individual,Hendrik Antoon Lorentz,1853-07-18,Arnhem,Netherlands,Male,Leiden University,Leiden,Netherlands,1928-02-04,NA,Netherlands'''
-            }
-        ]
-    }, {
-        'source': 'tidytuesday',
-        'name': 'Space launches',
-        'description': 'Taken from Economist GitHub (https://github.com/rfordatascience/tidytuesday/tree/main/data/2018/2018-08-21). These are the data behind the "space launches" article, The space race is dominated by new contenders. Principal data came from the Jonathan McDowell\'s JSR Launch Vehicle Database.',
-        'tables': [
-            {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2019/2019-01-15/agencies.csv',
-                'sample': '''agency,count,ucode,state_code,type,class,tstart,tstop,short_name,name,location,longitude,latitude,error,parent,short_english_name,english_name,unicode_name,agency_type
-RVSN,1528,RVSN,SU,O/LA,D,1960,1991 Dec,RVSN,Rakentiye Voiska Strategicheskogo Naznacheniye,Mosvka?,-,-,-,-,-,Strategic Rocket Forces,Ракетные войска стратегического назначения,state
-UNKS,904,GUKOS,SU,O/LA,D,1986 Apr 24,1991,UNKS,Upravleniye Nachalnika Kosmicheskikh Sredstv,Moskva,-,-,-,MO,-,-,Управление начальника космических средств МО СССР,state
-NASA,469,NASA,US,O/LA/LV/PL/S,C,1958 Oct  1,-,NASA,National Aeronautics and Space Administration,"Washington, D.C.",-,-,-,-,-,-,National Aeronautics and Space Administration,state
-USAF,388,USAF,US,O/LA/S,D,1947 Sep 18,-,USAF,United States Air Force,"Washington, DC-Pentagon",-,-,-,-,-,-,United States Air Force,state
-AE,258,AE,F,O/LA,B,1980 Mar 26,*,Arianespace,"Arianespace, Inc.","Paris-Evry, France",-,-,-,-,Arianespace,-,"Arianespace, Inc.",private
-AFSC,247,AFSC,US,LA,D,1961 Apr  1,1992 Jul  1,AFSC,"US Air Force Systems Command, Los Angeles AFS","El Segundo, California",-,-,-,USAF,-,-,"US Air Force Systems Command, Los Angeles AFS",state
-VKSR,200,GUKOS,RU,O/LA,D,1997 Jul,2001 Jun  1,VKS RVSN,"Voenno-Kosmicheskiye Sili (Military Space Forces), RVSN","Mosvka-Solnechnogorsk, Rossiya",-,-,-,RVSN,-,Russian Military Space Forces,Военно-космические силы РВСН,state
-CALT,181,CALT,CN,LA/LV/PL/E,C,1957 Nov 11,-,CALT,Zhongguo yunzaihuojian jishu yanjiu yuan,Beijing-Nanyuan,-,-,-,CASC,CALT,Chinese Academy of Launch Vehicle Technology (CASC 1st Acad),中国运载火箭技术研究院,state
-FKA,128,MOM,RU,O/LA,C,2004,2016 Jan  1,Roskosmos,Federal'noe kosmicheskoe agentstvo Rossii (Roskosmos),Moskva,-,-,-,-,-,Roskosmos,Федеральное космическое агентство (Роскосмос),state
-SAST,105,SBA,CN,O/LA/LV/PL,B,1993,-,SAST,Shanghai hangtian jishu yanjiuyuan,Shanghai-Minghan,-,-,-,CASC,-,Shanghai Academy of Space Technology (CASC 8th Acad),上海航天技术研究院,state
-ILSK,97,ILSK,RU,LA,B,1995,-,ILS-K,"International Launch Services, Khrunichev",Moskva,-,-,-,KHRU,-,-,"International Launch Services, Khrunichev",private
-KVR,78,GUKOS,RU,O/LA,D,2001 Jun  1,2011 Dec  1,KVR,Kosmichesikiye voyska Rossii,Moskva-Solnechnogorsk,-,-,-,-,-,Russian Space Forces,Космические войска России,state
-ULAL,70,ULAL,US,LA,B,2006 Dec,-,ULA/LMA,United Launch Alliance/Lockheed Martin Astronautics,"Denver-Centennial, Colorado",-,-,-,LM,-,-,United Launch Alliance/Lockheed Martin Astronautics,private
-KHRU,67,KHRU,RU,O/LA/LV/PL/S,B,1994,1998,Khrunichev,"GKNPTs im. M.V. Khrunichev, Zavod Khrunichev",Moskva-Fili,-,-,-,-,-,Khrunichev State Research and Production Center,ГКНПЦ им. М.В.Хруничева,state
-SPX,65,SPX,US,O/LA/LV/PL/S,B,2007 Aug,-,SpaceX,SpaceX,"Hawthorne, California",-,-,-,-,-,-,SpaceX,startup'''
-            }, {
-                "format": 'csv',
-                "url": 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2019/2019-01-15/launches.csv',
-                'sample': '''tag,JD,launch_date,launch_year,type,variant,mission,agency,state_code,category,agency_type
-1967-065,2439671.38,1967-06-29,1967,Thor Burner 2,,Secor Type II S/N 10,US,US,O,state
-1967-080,2439725.7,1967-08-23,1967,Thor Burner 2,,DAPP 3419,US,US,O,state
-1967-096,2439774.83,1967-10-11,1967,Thor Burner 2,,DAPP 4417,US,US,O,state
-1968-042,2439999.69,1968-05-23,1968,Thor Burner 2,,DAPP 5420,US,US,O,state
-1968-092,2440152.69,1968-10-23,1968,Thor Burner 2,,DAPP 6422,US,US,O,state
-1969-062,2440425.69,1969-07-23,1969,Thor Burner 2,,DAPP 7421,US,US,O,state
-1970-012,2440628.86,1970-02-11,1970,Thor Burner 2,,DAPP Block 5A F-1,US,US,O,state
-1970-070,2440832.86,1970-09-03,1970,Thor Burner 2,,DAPP Block 5A F-2,US,US,O,state
-1971-012,2440999.66,1971-02-17,1971,Thor Burner 2,,DAPP Block 5A F-3,US,US,O,state
-1971-054,2441111.08,1971-06-08,1971,Thor Burner 2,,P70-1,US,US,O,state
-1971-087,2441238.83,1971-10-14,1971,Thor Burner 2A,,DMSP Block 5B F-1 (SV-2),US,US,O,state
-1972-018,2441400.87,1972-03-24,1972,Thor Burner 2A,,DMSP Block 5B F-2 (SV-1),US,US,O,state
-1972-089,2441630.64,1972-11-09,1972,Thor Burner 2A,,DMSP Block 5B F-3,US,US,O,state
-1973-054,2441911.7,1973-08-17,1973,Thor Burner 2A,,DMSP Block 5B F-4,US,US,O,state
-1974-015,2442122.83,1974-03-16,1974,Thor Burner 2A,,DMSP Block 5B F-5,US,US,O,state
-1974-063,2442268.64,1974-08-09,1974,Thor Burner 2A,,DMSP Block 5C F-1,US,US,O,state'''
-            }
-        ]
     },
     {
         'source': 'df-study',
         'name': 'Health Spending',
-        'description': 'Global health spending estimates by country and year — total (THE), government (GHES), prepaid private (PPP), out-of-pocket (OOP), and development-assistance (DAH) expenditure, in absolute, per-capita, per-GDP, and share terms.',
+        'description': 'Global health spending estimates for 216 locations (countries, GBD super regions, World Bank income groups, and global) from 1995-2022 — total (THE), government (GHES), prepaid private (PPP), out-of-pocket (OOP), and development-assistance (DAH) expenditure, each given in absolute, per-capita, share-of-total, and share-of-GDP terms. Point estimates only; the uncertainty bounds of the full dataset are dropped.',
         'tables': [
             {'format': 'csv', 'path': 'example_datasets/health_spending.csv'},
         ]
@@ -425,27 +116,9 @@ SPX,65,SPX,US,O/LA/LV/PL/S,B,2007 Aug,-,SpaceX,SpaceX,"Hawthorne, California",-,
     {
         'source': 'df-study',
         'name': 'FAA Wildlife Strikes',
-        'description': 'FAA reports of wildlife strikes on aircraft (mostly birds) that caused damage, with airport, location, operator, aircraft, flight phase, weather, damage severity (Minor / Substantial), affected components, and species.',
+        'description': 'FAA reports of wildlife strikes on aircraft (mostly birds) from 1990-2026, with incident date and time of day, airport and coordinates, state, operator, aircraft type/class/mass, engine type and count, flight phase, height, speed, distance, sky and precipitation conditions, damage severity (Minor / Substantial / Destroyed / Undetermined), and the species, size, and number of animals struck.',
         'tables': [
             {'format': 'csv', 'path': 'example_datasets/faa_damage.csv'},
         ]
     },
-    {
-        'source': 'df-study',
-        'name': 'Health Spending (Clean)',
-        'description': 'Global health spending estimates for 216 locations (countries, GBD super regions, World Bank income groups, and global) from 1995-2022 — total (THE), government (GHES), prepaid private (PPP), out-of-pocket (OOP), and development-assistance (DAH) expenditure, each given in absolute, per-capita, share-of-total, and share-of-GDP terms. Point estimates only; the uncertainty bounds of the full dataset are dropped.',
-        'tables': [
-            {'format': 'csv', 'path': 'example_datasets/health_spending_clean.csv'},
-        ]
-    },
-    {
-        'source': 'df-study',
-        'name': 'FAA Wildlife Strikes (Clean)',
-        'description': 'FAA reports of wildlife strikes on aircraft (mostly birds) from 1990-2026, with incident date and time of day, airport and coordinates, state, operator, aircraft type/class/mass, engine type and count, flight phase, height, speed, distance, sky and precipitation conditions, damage severity (Minor / Substantial / Destroyed / Undetermined), and the species, size, and number of animals struck.',
-        'tables': [
-            {'format': 'csv', 'path': 'example_datasets/faa_damage_clean.csv'},
-        ]
-    },
 ]
-
-
