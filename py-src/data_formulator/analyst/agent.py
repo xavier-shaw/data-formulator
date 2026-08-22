@@ -90,7 +90,7 @@ _SKILL_LOADED_RE = re.compile(r"^\[SKILL LOADED: ([^\]]+)\]")
 # report panel (per-chart "add to report" buttons), so the agent must not
 # write reports for them. Default mode (analysis_mode=None) keeps the skill.
 _REPORT_SKILL = "report"
-_REPORT_GATED_MODES = frozenset({"executor", "analyst", "analyst_guided"})
+_REPORT_GATED_MODES = frozenset({"executor", "analyst_guided"})
 _REPORT_GATE_MESSAGE = (
     "Report writing is not available in this session: the user documents "
     "their own findings in the report panel (every chart card has an "
@@ -321,8 +321,8 @@ class AnalystAgent:
         # taxonomy), loaded from modes/<name>.md. Defaults to the Default mode's
         # profile (the unmodified product prompt); Executor/Analyst pass their own.
         self.prompt_profile = prompt_profile or load_mode("default").profile
-        # Study mode name ('executor' / 'analyst' / 'analyst_guided') or None
-        # for Default. Study modes gate the report skill (_REPORT_GATED_MODES).
+        # Study mode name ('executor' / 'analyst_guided') or None for
+        # Default. Study modes gate the report skill (_REPORT_GATED_MODES).
         self.analysis_mode = analysis_mode
         self.language_instruction = language_instruction
         self.max_iterations = max_iterations

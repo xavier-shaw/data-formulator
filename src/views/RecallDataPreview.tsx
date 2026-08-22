@@ -11,8 +11,8 @@
  * the ones they saw. It is fed a small slice of rows with `virtual={false}`, so
  * it renders statically and never calls the sampling endpoint.
  *
- * Shared by part 1 (name the attributes) and part 2 (group them), which ask
- * over the same table and must show it identically.
+ * Shared by the parts that ask over that table and must show it identically:
+ * the three questions they would ask next, name the attributes, and group them.
  */
 
 import { FC, useMemo } from 'react';
@@ -34,8 +34,10 @@ interface RecallDataPreviewProps {
     table?: DictTable;
     /** how much vertical room the step can spare */
     height: number;
-    /** shown in place of the grid when the session's table could not be read */
-    emptyNote: string;
+    /** shown in place of the grid when the session's table could not be read.
+     *  Omit it where the table is a prompt rather than the material — the
+     *  questions part still works without it, so it shows nothing instead. */
+    emptyNote?: string;
 }
 
 export const RecallDataPreview: FC<RecallDataPreviewProps> = ({ table, height, emptyNote }) => {
@@ -86,6 +88,7 @@ export const RecallDataPreview: FC<RecallDataPreviewProps> = ({ table, height, e
     }, [table, previewRows, conceptShelfItems]);
 
     if (!table) {
+        if (!emptyNote) return null;
         return (
             <Typography sx={{ fontSize: 12.5, color: 'text.disabled', mb: 2 }}>{emptyNote}</Typography>
         );

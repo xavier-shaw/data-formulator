@@ -19,7 +19,6 @@ import React, { FC } from 'react';
 import {
     Box,
     IconButton,
-    Tooltip,
     Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -29,6 +28,7 @@ import { useTranslation } from 'react-i18next';
 
 import { DataFormulatorState, dfActions } from '../app/dfSlice';
 import { getCachedChart } from '../app/chartCache';
+import { chartDisplayTitle } from '../app/chartTitle';
 import { floatingPillSx } from '../app/tokens';
 
 // Stable fallback so the selector never fabricates a fresh [] per call
@@ -48,7 +48,7 @@ const FindingPreview: FC<{ chartId: string }> = ({ chartId }) => {
                 height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: theme => `1px dashed ${theme.palette.divider}`, borderRadius: 1,
                 fontSize: 11, color: 'text.disabled',
-            }}>{t('findings.previewPending')}</Box>
+            }}>{t('report.findingsPreviewPending')}</Box>
         );
     }
     return (
@@ -66,6 +66,12 @@ export const FindingsPanel: FC = () => {
 
     const findingsChartIds = useSelector((s: DataFormulatorState) => s.findingsChartIds) ?? EMPTY_FINDINGS_IDS;
     const charts = useSelector((s: DataFormulatorState) => s.charts);
+    // `chartDisplayTitle` names a chart from what it encodes when the chart
+    // carries no title of its own, so an entry never reads as a bare number.
+    const conceptShelfItems = useSelector((s: DataFormulatorState) => s.conceptShelfItems);
+    const fieldsById = React.useMemo(
+        () => new Map((conceptShelfItems ?? []).map(f => [f.id, f])),
+        [conceptShelfItems]);
 
     // Defensive: render only ids that still resolve to a chart (delete cascades
     // already prune state, but a stale persisted session must not crash here).
@@ -88,19 +94,17 @@ export const FindingsPanel: FC = () => {
                         {t('report.myFindingsTitle')}
                     </Typography>
                     <Typography noWrap sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1.35 }}>
-                        {t('findings.chartCount', { count: entries.length })}
+                        {t('report.findingsChartCount', { count: entries.length })}
                     </Typography>
                 </Box>
                 <Box sx={{ ml: 'auto', flexShrink: 0 }}>
-                    <Tooltip title={t('findings.closePanel')} placement="left">
-                        <IconButton
-                            size="small"
-                            onClick={() => dispatch(dfActions.closeReportView())}
-                            sx={floatingPillSx}
-                        >
-                            <CloseIcon sx={{ fontSize: 18 }} />
-                        </IconButton>
-                    </Tooltip>
+                    <IconButton
+                        size="small"
+                        onClick={() => dispatch(dfActions.closeReportView())}
+                        sx={floatingPillSx}
+                    >
+                        <CloseIcon sx={{ fontSize: 18 }} />
+                    </IconButton>
                 </Box>
             </Box>
 
@@ -108,12 +112,17 @@ export const FindingsPanel: FC = () => {
             <Box sx={{ flex: 1, overflowY: 'auto', px: 1.5, py: 1.5, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
                 {entries.length === 0 && (
                     <Typography sx={{ fontSize: 12, color: 'text.secondary', textAlign: 'center', my: 'auto', px: 1, lineHeight: 1.6 }}>
-                        {t('findings.emptyHint')}
+                        {t('report.findingsEmptyHint')}
                     </Typography>
                 )}
                 {entries.map((chart, idx) => {
-                    const title = chart.title?.trim()
-                        || t('report.chartNumberFallback', { number: idx + 1 });
+                    // "Chart #2: Damage Level by Time of Day" — the number is the
+                    // entry's place in this panel, so it reads in the order the
+                    // participant collected them.
+                    const title = t('report.findingChartTitle', {
+                        number: idx + 1,
+                        title: chartDisplayTitle(chart, fieldsById),
+                    });
                     return (
                         <Box
                             key={chart.id}
@@ -133,25 +142,23 @@ export const FindingsPanel: FC = () => {
                             }}
                         >
                             {/* Remove the whole group */}
-                            <Tooltip title={t('findings.removeChart')} placement="left">
-                                <IconButton
-                                    className="findings-remove-btn"
-                                    size="small"
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        dispatch(dfActions.removeChartFromFindings({ chartId: chart.id }));
-                                    }}
-                                    sx={{
-                                        position: 'absolute', top: 6, right: 6, zIndex: 2,
-                                        opacity: 0, transition: 'opacity 0.15s',
-                                        backgroundColor: 'background.paper',
-                                        border: theme => `1px solid ${theme.palette.divider}`,
-                                        '&:hover': { color: 'error.main', backgroundColor: 'background.paper' },
-                                    }}
-                                >
-                                    <DeleteOutlineIcon sx={{ fontSize: 16 }} />
-                                </IconButton>
-                            </Tooltip>
+                            <IconButton
+                                className="findings-remove-btn"
+                                size="small"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    dispatch(dfActions.removeChartFromFindings({ chartId: chart.id }));
+                                }}
+                                sx={{
+                                    position: 'absolute', top: 6, right: 6, zIndex: 2,
+                                    opacity: 0, transition: 'opacity 0.15s',
+                                    backgroundColor: 'background.paper',
+                                    border: theme => `1px solid ${theme.palette.divider}`,
+                                    '&:hover': { color: 'error.main', backgroundColor: 'background.paper' },
+                                }}
+                            >
+                                <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
                             <Typography sx={{ fontSize: 13, fontWeight: 500, mb: 0.75, pr: 4 }}>
                                 {title}
                             </Typography>

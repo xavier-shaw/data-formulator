@@ -8,7 +8,7 @@ single file shows a mode's complete prompt. This command assembles and prints it
 so you can read the whole thing end-to-end while still editing the small deltas.
 
 Usage:
-    python -m data_formulator.analyst.preview_mode analyst
+    python -m data_formulator.analyst.preview_mode analyst_guided
     python -m data_formulator.analyst.preview_mode executor
     python -m data_formulator.analyst.preview_mode default
 """
@@ -35,7 +35,7 @@ def render(name: str) -> str:
 
 
 def main() -> None:
-    name = sys.argv[1] if len(sys.argv) > 1 else "analyst"
+    name = sys.argv[1] if len(sys.argv) > 1 else "analyst_guided"
     try:
         prompt = render(name)
     except ValueError as exc:

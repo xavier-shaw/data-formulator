@@ -1174,7 +1174,7 @@ export const ChartEditorFC: FC<{}> = function ChartEditorFC({}) {
                     is a plain chart collection (no report document backs it, so
                     there is nothing to ensure before opening). */}
                 {(config.studyCondition ?? 'default') !== 'default' && (
-                    <Tooltip title={findingsReportOpen ? t('findings.closePanel') : t('report.openFindings')} placement="bottom">
+                    <Tooltip title={findingsReportOpen ? t('report.closePanel') : t('report.openFindings')} placement="bottom">
                         <IconButton
                             size="small"
                             onClick={() => {

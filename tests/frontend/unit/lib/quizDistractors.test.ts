@@ -471,7 +471,7 @@ describe('axis purity', () => {
         const session = extractSession(state);
         const data = withSeededRandom(1, () => generateDataCandidates(session.charts[0]));
         expect(data.length).toBeGreaterThanOrEqual(2);
-        for (const c of data) expect(c.op.startsWith('dist-')).toBe(true);
+        for (const c of data) expect(['move', 'reverse', 'shrink']).toContain(c.op);
         // The skewed sample admits all three: the center moves, the skew
         // mirrors, the spread widens.
         expect(new Set(data.map(c => c.dim)).size).toBeGreaterThanOrEqual(2);

@@ -6,7 +6,11 @@
  *
  * One item at a time. The context — the chart made before this one, then the
  * chart itself — and three real charts from the session to choose between.
- * Confirming REVEALS the true next chart, and the next item follows.
+ *
+ * The answer mechanism is part 4's: ONE pick, one confirm, and the next item
+ * follows. The participant gets no feedback — neither the true next chart nor
+ * whether they had it. Only the researcher's eye toggle (bottom right)
+ * outlines the chart that really came next.
  *
  * The step FILLS the height it is given and never scrolls: the two chart rows
  * take every pixel the question, the rating and the button leave, so an item
@@ -17,10 +21,10 @@
  */
 
 import { FC, useMemo, useRef, useState } from 'react';
-import { Box, Button, Typography, alpha, useTheme } from '@mui/material';
+import { Box, Button, IconButton, Tooltip, Typography, alpha, useTheme } from '@mui/material';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useTranslation } from 'react-i18next';
 import { borderColor, radius } from '../app/tokens';
 import { CONFIDENCE_DEFAULT, ConfidenceRater } from './ConfidenceRater';
@@ -47,6 +51,10 @@ const ChartCard: FC<{
     <Box component={onClick ? 'button' : 'div'} onClick={onClick} type={onClick ? 'button' : undefined}
         sx={{
             width, height: '100%', minWidth: 0, minHeight: 0, p: 0.75, background: '#fff', textAlign: 'left',
+            // This route has no CSS reset, so the default content-box would
+            // add the padding and the border ON TOP of the 100% and push the
+            // card past the row it is given.
+            boxSizing: 'border-box',
             display: 'flex', flexDirection: 'column',
             border: `2px solid ${tone ?? borderColor.view}`, borderRadius: radius.sm,
             opacity: dim ? 0.6 : 1, cursor: onClick ? 'pointer' : 'default',
@@ -88,10 +96,10 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
 
     const [index, setIndex] = useState(0);
     const [picked, setPicked] = useState<string | null>(null);
-    const [revealed, setRevealed] = useState(false);
-    // Confidence in the PICK, so it is asked before the reveal and frozen by
-    // it — the rater goes read-only the moment the true chart is outlined,
-    // otherwise the rating could be revised once the answer is on screen.
+    // The researcher's eye toggle (bottom right): when on, the chart that
+    // really came next is outlined. Never shown to the participant by default.
+    const [showAnswer, setShowAnswer] = useState(false);
+    // Confidence in the pick, committed with it and reset for every move.
     const [confidence, setConfidence] = useState(CONFIDENCE_DEFAULT);
     const [confidenceSet, setConfidenceSet] = useState(false);
     const [responses, setResponses] = useState<ProvenanceResponse[]>([]);
@@ -138,23 +146,25 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
             return;
         }
         setIndex(i => i + 1);
-        setPicked(null); setRevealed(false);
+        setPicked(null);
         setConfidence(CONFIDENCE_DEFAULT); setConfidenceSet(false);
         itemStartRef.current = Date.now();
     };
 
-    const correct = revealed && picked === answer.chartId;
-
-    /** Border colour for an option: neutral while choosing, verdict once revealed. */
+    /** Border colour for an option. Selecting is a neutral highlight; the
+     *  right answer is never marked for the participant, and is outlined only
+     *  while the researcher's eye toggle is on. */
     const optionTone = (chartId: string): string | undefined => {
-        if (!revealed) return picked === chartId ? theme.palette.primary.main : undefined;
-        if (chartId === answer.chartId) return theme.palette.success.main;
-        return picked === chartId ? theme.palette.error.main : undefined;
+        if (picked === chartId) return theme.palette.primary.main;
+        if (showAnswer && chartId === answer.chartId) return theme.palette.success.main;
+        return undefined;
     };
 
     return (
         <Box sx={{ p: 1.5, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column',
-                   overflow: 'hidden' }}>
+                   // Without this the step's own padding is added to the 100%
+                   // it is given, and the whole quiz page scrolls by 24px.
+                   boxSizing: 'border-box', overflow: 'hidden' }}>
             <Typography sx={{ flexShrink: 0, fontSize: 11, color: 'text.disabled', mb: 0.75 }}>
                 {t('quiz.provProgress', { n: index + 1, total: material.items.length,
                     defaultValue: `Move ${index + 1} of ${material.items.length}` })}
@@ -189,43 +199,51 @@ export const ProvenanceStep: FC<ProvenanceStepProps> = ({ material, onDone, wide
                 {item.options.map(opt => (
                     <ChartCard key={opt.chartId} chart={opt} width="100%"
                         tone={optionTone(opt.chartId)}
-                        onClick={revealed ? undefined : () => setPicked(opt.chartId)} />
+                        onClick={() => setPicked(opt.chartId)} />
                 ))}
             </Box>
 
-            {/* The verdict keeps its row whether or not it says anything, so
-                revealing an answer never moves the rating or the button. */}
-            <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5, minHeight: 22, mb: 0.5 }}>
-                {revealed && (correct
-                    ? <CheckCircleOutlineIcon sx={{ fontSize: 16, color: 'success.main' }} />
-                    : <HighlightOffIcon sx={{ fontSize: 16, color: 'error.main' }} />)}
-                <Typography sx={{ fontSize: 11.5, color: correct ? 'success.main' : 'error.main' }}>
-                    {revealed
-                        ? (correct
-                            ? t('quiz.provRight', { defaultValue: 'Yes — that is the chart you made next.' })
-                            : t('quiz.provWrong', { defaultValue: 'Not that one. The chart you actually made next is outlined in green.' }))
-                        : ''}
-                </Typography>
-            </Box>
-
-            {/* Below the candidates: the rating is about the pick, so it shares
-                the row with the button that commits it, and confirming freezes
-                it. Once revealed, the same button moves on. */}
+            {/* Below the candidates: the rating is about the pick, and the
+                confirm commits both and moves on. */}
             <Box sx={{ flexShrink: 0 }}>
                 <ConfidenceRater
                     value={confidence}
                     onChange={setConfidence}
                     onTouch={() => setConfidenceSet(true)}
-                    disabled={revealed}
                     action={
-                        <Button variant="contained" disabled={!picked}
-                            onClick={revealed ? handleNext : () => setRevealed(true)}
+                        <Button variant="contained" disabled={!picked} onClick={handleNext}
                             sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
                             {t('quiz.confirm', { defaultValue: 'Confirm' })}
                         </Button>
                     }
                 />
             </Box>
+
+            {/* The researcher's eye, as in part 4: sits just above the
+                system-messages info button (MessageSnackbar, bottom 16 right
+                16). On, it outlines the chart that really came next; the
+                participant never sees this by default. */}
+            <Tooltip placement="left" title={showAnswer
+                ? t('quiz.provAnswerHide', { defaultValue: 'Hide the chart that came next' })
+                : t('quiz.provAnswerShow', { defaultValue: 'Show the chart that came next' })}>
+                <IconButton
+                    onClick={() => setShowAnswer(v => !v)}
+                    sx={{
+                        position: 'fixed', bottom: 52, right: 16,
+                        width: 30, height: 30, zIndex: 10,
+                        backgroundColor: 'white',
+                        border: '1px solid',
+                        borderColor: showAnswer ? 'primary.main' : 'grey.400',
+                        color: showAnswer ? 'primary.main' : 'text.disabled',
+                        boxShadow: '0 0 6px rgba(0,0,0,0.1)',
+                        opacity: showAnswer ? 1 : 0.6,
+                        transition: 'all 0.3s ease',
+                        '&:hover': { transform: 'scale(1.1)', backgroundColor: 'white' },
+                    }}
+                >
+                    {showAnswer ? <VisibilityIcon sx={{ fontSize: 18 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 18 }} />}
+                </IconButton>
+            </Tooltip>
         </Box>
     );
 };

@@ -81,9 +81,9 @@ const PlanStepItem: React.FC<{
         }}
         onClick={() => setExpanded(prev => !prev)}
         >
-            <IconComp sx={{ width: 10, height: 10, color: iconColor, flexShrink: 0, mt: '2px' }} />
+            <IconComp sx={{ width: 12, height: 12, color: iconColor, flexShrink: 0, mt: '2px' }} />
             <Typography component="span" sx={{
-                fontSize: '10px',
+                fontSize: '12px',
                 color: textColor,
                 fontStyle: 'italic',
                 lineHeight: 1.4,
@@ -262,7 +262,7 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
         // instruction card itself stays free of chip-strip chrome.
         return (
             <Box onClick={handleClick} sx={{
-                fontSize: '11px',
+                fontSize: '13px',
                 color: theme.palette.text.primary,
                 py: 0.5, px: 1,
                 borderRadius: radius.sm,
@@ -476,7 +476,7 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
                     {hasPlan && <Box sx={{ borderBottom: `1px solid ${borderColor.component}`, my: '2px' }} />}
                     {collapsedLabel && (
                         <Typography component="div" sx={{
-                            fontSize: '11px',
+                            fontSize: '13px',
                             color,
                             py: '1px',
                         }}>
@@ -488,7 +488,7 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
                 {collapsedLabel ? (
                     !expanded && (
                         <Typography component="div" sx={{
-                            fontSize: isResolvedPause ? '10px' : '11px',
+                            fontSize: isResolvedPause ? '12px' : '13px',
                             color: theme.palette.text.secondary,
                             fontStyle: isResolvedPause ? 'italic' : 'normal',
                             py: '1px',
@@ -501,12 +501,12 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
                         </Typography>
                     )
                 ) : entry.role === 'summary' ? (
-                    <Box sx={{ fontSize: '11px', py: '1px' }}>
+                    <Box sx={{ fontSize: '13px', py: '1px' }}>
                         <CompactMarkdown content={displayText} color={color} />
                     </Box>
                 ) : (
                     <Typography component="div" sx={{
-                        fontSize: '11px',
+                        fontSize: '13px',
                         color,
                         py: '1px',
                         ...((forceClampText || (canClampText && !expanded)) ? {
@@ -520,7 +520,7 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
                             <Box component="span" sx={{
                                 display: 'inline',
                                 fontWeight: 600,
-                                fontSize: '10px',
+                                fontSize: '12px',
                                 mr: '4px',
                             }}>
                                 ({entry.role === 'delegate'
@@ -546,7 +546,7 @@ export const InteractionEntryCard: React.FC<InteractionEntryCardProps> = memo(({
     // Fallback for any remaining entries
     return (
         <Typography component="div" onClick={handleClick} sx={{
-            fontSize: '11px',
+            fontSize: '13px',
             color: theme.palette.text.secondary,
             py: '1px',
             ...clickSx,
@@ -606,13 +606,13 @@ export const ResolvedConversationCard: React.FC<ResolvedConversationCardProps> =
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: '6px',
-                    fontSize: '11px',
+                    fontSize: '13px',
                     color: dim,
                     opacity: 0.8,
                 }}>
                     {turnCount > 1 && (
                         <Typography component="span" sx={{
-                            fontSize: '10px',
+                            fontSize: '12px',
                             color: 'inherit',
                             opacity: 0.7,
                             flexShrink: 0,
@@ -643,7 +643,7 @@ export const ResolvedConversationCard: React.FC<ResolvedConversationCardProps> =
                     {pairs.map((p, idx) => (
                         <React.Fragment key={idx}>
                             <Box sx={{
-                                fontSize: '11px',
+                                fontSize: '13px',
                                 color: theme.palette.text.primary,
                                 py: 0.5, px: 1,
                                 borderRadius: radius.sm,
@@ -655,7 +655,7 @@ export const ResolvedConversationCard: React.FC<ResolvedConversationCardProps> =
                                 </Typography>
                             </Box>
                             <Box sx={{
-                                fontSize: '11px',
+                                fontSize: '13px',
                                 color: theme.palette.text.primary,
                                 py: 0.5, px: 1,
                                 borderRadius: radius.sm,

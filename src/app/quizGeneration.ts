@@ -237,7 +237,7 @@ export interface QuizAnswer {
 
     /** set only on a miss: which axis produced the chosen look-alike (visual / data / combined) */
     method?: string;
-    /** the specific operation behind it, e.g. 'mark', 'reassign-reverse', 'mark+attenuate' */
+    /** the specific operation behind it, e.g. 'mark', 'reverse', 'mark+shrink' */
     op?: string;
     label?: string;
     /** data and combined lures: the message dimension the lure attacked (direction / location / existence / strength) */

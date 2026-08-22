@@ -78,18 +78,21 @@ cost in `distance.ts`. It is never declared in the tables.
 ## P2 — Data perturbation
 
 The permitted operators are DECLARED per chart type in `curated.ts`, by
-operator id, in preference order. Each operator attacks one dimension of
-the message:
+operator id, in preference order. An id names one MESSAGE ATTACK, not one
+mechanic: several mechanics can share an id — one per data type
+(categorical, bivariate, distributional, signed) — and the chart's data
+type selects which one runs. The answer file keeps the mechanic in the
+lure's label.
 
-| Dimension | Question probed | Implemented operators |
+| Dimension | Question probed | Operator ids and their per-data-type mechanics |
 |---|---|---|
-| **Direction** | Which way did it go? | `reassign-reverse` (values move to the labels in the opposite order), `antitone` (the y ranks flip, bivariate), `series-exchange` (two series trade all values), `dist-mirror` (the skew mirrors), `negate` (every value changes its sign; gate: mixed signs) |
-| **Location** | Where was the peak or the leader? | `reassign-rotate` (cyclic move along an ordered axis), `dist-shift` (the center moves along a continuous axis). `reassign-swap` (the top two trade values) stays implemented, but no v6 table uses it: a swap moves only two values, which is too subtle (review 2026-08-18). |
-| **Existence** | Was there a pattern at all? | `decorrelate` (permute y, bivariate), `shuffle` (permute the values among the labels), `equalize` (all values move to the mean) |
-| **Strength** | How big was the effect? | `attenuate` (deviations × 0.45), `polarize` (deviations × 1.7), `attenuate-relation` / `polarize-relation` (residuals scale, bivariate), `dist-widen` (deviations × 1.8 on raw values) |
+| **Direction** | Which way did it go? | `reverse` — categorical: the values move to the labels in the opposite order; bivariate: the y ranks flip; distributional: the skew mirrors; signed deltas: every value changes its sign (this mechanic wins when the signs are mixed). `exchange` — two series trade all their values (needs 2+ series on one scale). |
+| **Location** | Where was the peak or the leader? | `move` — categorical: a cyclic move along the label axis (~40% of the labels); distributional: every value moves by 30% of the range. `swap` — the top two trade values; implemented, but no v6 table uses it: a swap moves only two values, which is too subtle (review 2026-08-18). |
+| **Existence** | Was there a pattern at all? | `shuffle` — categorical: the values mix among the labels; bivariate: y mixes among the points until the relation is gone. `flatten` — all values move to the mean (categorical). |
+| **Strength** | How big was the effect? | `shrink` — categorical: deviations × 0.45; bivariate: residuals × 2.2, so the relation loosens; distributional: deviations × 1.8, so the peak widens and weakens. `amplify` — categorical: deviations × 1.7; bivariate: residuals × 0.35, so the relation tightens. |
 
-The factors ×0.45 and ×1.7 come from the v3 tables (gap flatten, gap
-exaggerate).
+The factors ×0.45 and ×1.7 come from the v3 tables (their gap-reduce and
+gap-exaggerate rows).
 
 Every operator keeps its GATE (refuse before work) and its FLOOR (verify
 after work): an operator that did not change the message enough is dropped,
@@ -97,9 +100,10 @@ whatever its name says. The sorted-profile rule also stays: a decoy on a
 size-sorted axis goes back into the sorted order, so the profile shape does
 not give the answer away.
 
-The `dist-*` operators are new in v5. A Histogram or a Density Plot has no
-label axis, so the label operators cannot run there; the `dist-*` operators
-work on the raw values of the one quantitative field, per series.
+The raw-value mechanics (the distributional rows of `move`, `reverse`,
+`shrink`) are new in v5. A Histogram or a Density Plot has no label axis,
+so the label mechanics cannot run there; the raw-value mechanics work on
+the raw values of the one quantitative field, per series.
 
 ## Combined perturbation
 
@@ -119,55 +123,55 @@ possible. "Review:" names what the review changed against v5.
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Scatter Plot | Heatmap (binned) | antitone, decorrelate, attenuate-relation, polarize-relation | Scatter ↔ Regression does not count (too close); Strip Plot reads the same as a scatter. A binned Histogram is admitted by design — deferred (same-fields exemption). |
+| Scatter Plot | Heatmap (binned) | reverse, shuffle, shrink, amplify | Scatter ↔ Regression does not count (too close); Strip Plot reads the same as a scatter. A binned Histogram is admitted by design — deferred (same-fields exemption). |
 | Regression | Heatmap (binned) | the same as Scatter Plot | the same |
-| Ranged Dot Plot | Grouped Bar Chart, Stacked Bar Chart, Strip Plot, Scatter Plot | series-exchange, shuffle, attenuate | Stacked Bar and Strip/Scatter added; Lollipop dropped. Rank swap replaced by shuffle: a swap moves only two values. |
-| Strip Plot | Boxplot | shuffle, reassign-reverse | Scatter dropped (reads the same); the category swap dropped. |
+| Ranged Dot Plot | Grouped Bar Chart, Stacked Bar Chart, Strip Plot, Scatter Plot | exchange, shuffle, shrink | Stacked Bar and Strip/Scatter added; Lollipop dropped. Rank swap replaced by shuffle: a swap moves only two values. |
+| Strip Plot | Boxplot | shuffle, reverse | Scatter dropped (reads the same); the category swap dropped. |
 
 ### Bars
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Bar Chart | Lollipop Chart, Bar Table, Pie Chart | reassign-reverse, equalize | Heatmap dropped; rank swap and the gap-scaling pair dropped. Line / Area stay banned: a nominal axis shows a trend that is not real. |
+| Bar Chart | Lollipop Chart, Bar Table, Pie Chart | reverse, flatten | Heatmap dropped; rank swap and the gap-scaling pair dropped. Line / Area stay banned: a nominal axis shows a trend that is not real. |
 | Lollipop Chart | Bar Chart, Bar Table, Pie Chart | the same as Bar Chart | the same |
 | Bar Table | Bar Chart, Lollipop Chart, Pie Chart | the same as Bar Chart | the same |
-| Grouped Bar Chart | Stacked Bar Chart, Line Chart (ordered x) | series-exchange, attenuate, equalize | Heatmap dropped; the one-group leader swap dropped. |
-| Stacked Bar Chart | Grouped Bar Chart, Line Chart + series (ordered x) | series-exchange, reassign-reverse, equalize | Streamgraph and stacked Area dropped; the multi-line added. |
-| Waterfall Chart | Bar Chart (the same signed deltas) | reassign-rotate, negate | The sign flip (negate) added; swap and attenuate dropped. A running-sum Line is admitted by design — deferred (needs a derive). |
+| Grouped Bar Chart | Stacked Bar Chart, Line Chart (ordered x), Scatter Plot | exchange, shrink, flatten | Heatmap dropped; the one-group leader swap dropped. Scatter added (2026-08-19): points per category stay honest on a nominal x, where the line is refused. |
+| Stacked Bar Chart | Grouped Bar Chart, Line Chart + series (ordered x), Scatter Plot | exchange, reverse, flatten | Streamgraph and stacked Area dropped; the multi-line added. Scatter added (2026-08-19), same reason as Grouped Bar. |
+| Waterfall Chart | Bar Chart (the same signed deltas) | move, reverse | The sign flip added; swap and shrink dropped. A running-sum Line is admitted by design — deferred (needs a derive). |
 
 ### Distributions
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Histogram | Density Plot, Strip Plot, Boxplot | dist-shift, dist-mirror, dist-widen | Unchanged. |
+| Histogram | Density Plot, Strip Plot, Boxplot | move, reverse, shrink | Unchanged. |
 | Density Plot | Histogram, Strip Plot, Boxplot | the same as Histogram | Unchanged. |
-| Boxplot | Strip Plot, Density Plot (grouped, ≤ 6 categories) | reassign-reverse, shuffle | Grouped Density added; the top-median swap dropped. |
-| Pyramid Chart | Grouped Bar Chart, Line Chart (the two side profiles) | series-exchange, reassign-rotate, attenuate | The side-profile lines added. |
+| Boxplot | Strip Plot, Density Plot (grouped, ≤ 6 categories) | reverse, shuffle | Grouped Density added; the top-median swap dropped. |
+| Pyramid Chart | Grouped Bar Chart, Line Chart (the two side profiles) | exchange, move, shrink | The side-profile lines added. |
 | Candlestick Chart | none shipped | none shipped | The review ADMITS: a close-only Line (and possibly Ranged Dot of high–low, or a Waterfall of the moves), open/close reversal, big-day rotation. All need machinery — see "Deferred machinery". Until then the type is skipped. |
 
 ### Lines & Areas
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Line Chart | Area Chart, Bar Chart, Scatter Plot (points) | reassign-reverse, reassign-rotate, attenuate, polarize | Bump dropped as a target; detrend (equalize) dropped. Pie / Rose stay banned: they destroy the ordered axis. |
+| Line Chart | Area Chart, Bar Chart, Scatter Plot (points) | reverse, move, shrink, amplify | Bump dropped as a target; detrend (flatten) dropped. Pie / Rose stay banned: they destroy the ordered axis. |
 | Area Chart | Line Chart, Bar Chart, Scatter Plot (points) | the same as Line Chart | Streamgraph dropped. |
-| Bump Chart | Line Chart (values) | reassign-reverse, reassign-rotate, shuffle | Unchanged. |
-| Streamgraph | Area Chart, Stacked Bar Chart, Line Chart + series | series-exchange, reassign-rotate, attenuate, equalize | The unstacked multi-line added. |
+| Bump Chart | Line Chart (values) | reverse, move, shuffle | Unchanged. |
+| Streamgraph | Area Chart, Stacked Bar Chart, Line Chart + series | exchange, move, shrink, flatten | The unstacked multi-line added. |
 
 ### Circular
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Pie Chart | Rose Chart, Bar Chart | reassign-reverse, equalize | The dominant-share swap and the majority flip dropped. |
-| Rose Chart | Pie Chart, Bar Chart | reassign-reverse, equalize | The rotation dropped. |
-| Radar Chart | Rose Chart, Bar Chart | reassign-reverse, equalize | The spike swap and the flatten dropped. |
+| Pie Chart | Rose Chart, Bar Chart | reverse, flatten | The dominant-share swap and the majority flip dropped. |
+| Rose Chart | Pie Chart, Bar Chart | reverse, flatten | The rotation dropped. |
+| Radar Chart | Rose Chart, Bar Chart | reverse, flatten | The spike swap and the flatten dropped. |
 
 ### Tables & Maps
 
 | Chart type | Visual targets | Data operators | Notes from the review |
 |---|---|---|---|
-| Heatmap | Grouped Bar Chart, Scatter Plot (size), Stacked Bar Chart | reassign-reverse, attenuate, shuffle | Stacked Bar added; the hotspot swap dropped from the data axis. |
-| US Map | Bar Chart (regions as categories) | shuffle, reassign-reverse, equalize | The basemap swap dropped — a wrong basemap is implausible on sight. Rank swap replaced by shuffle: a swap moves only two values, and a shuffle moves the hotspot with the whole pattern. |
+| Heatmap | Grouped Bar Chart, Scatter Plot (size), Stacked Bar Chart | reverse, shrink, shuffle | Stacked Bar added; the hotspot swap dropped from the data axis. |
+| US Map | Bar Chart (regions as categories) | shuffle, reverse, flatten | The basemap swap dropped — a wrong basemap is implausible on sight. Rank swap replaced by shuffle: a swap moves only two values, and a shuffle moves the hotspot with the whole pattern. |
 | World Map | the same as US Map | the same as US Map | the same |
 | KPI Card | none | none — one collapsed number has no look-alike space | — |
 
@@ -226,14 +230,25 @@ so they are NOT in `curated.ts`. Each names the machinery it waits for.
 - **v4 (2026-08-16).** Derived visual roster; visual axis without a quota;
   transpose and recolor removed. The data axis kept generic operators.
 - **v5 (2026-08-17).** The v3 tables return, on the v4 machinery. The item
-  becomes an option matrix with combined lures. `polarize` moves to ×1.7
-  (the v3 value). The `dist-*` operators give Histogram / Density Plot a
+  becomes an option matrix with combined lures. `amplify` moves to ×1.7
+  (the v3 value). The raw-value operators give Histogram / Density Plot a
   data axis. Transpose and recolor stay removed.
 - **v6 (2026-08-18).** The tables reviewed with the researcher, one chart
   type at a time. Most lists become shorter; near-duplicate retargets
-  (Scatter ↔ Regression, Strip ↔ Scatter) no longer count. `negate` added
-  for signed deltas. Candlestick admitted by design but deferred. The
+  (Scatter ↔ Regression, Strip ↔ Scatter) no longer count. The sign flip
+  added for signed deltas. Candlestick admitted by design but deferred. The
   basemap swap for maps dropped in favor of a regions bar chart. Later the
-  same day: `reassign-swap` removed from the last three tables (Ranged Dot,
+  same day: `swap` removed from the last three tables (Ranged Dot,
   US/World Map) — a swap moves only two values, which is too subtle;
   shuffle takes its place, so those tables probe direction + existence.
+- **Operator rename (2026-08-19).** An id now names one MESSAGE ATTACK; the
+  chart's data type selects the mechanic, and the lure's label still names
+  it. Eight ids remain: reverse, exchange, move, swap, shuffle, flatten,
+  shrink, amplify. Old → new: reassign-reverse, antitone, negate and
+  dist-mirror → reverse; series-exchange → exchange; reassign-rotate and
+  dist-shift → move; reassign-swap → swap; decorrelate → shuffle;
+  equalize → flatten; attenuate, attenuate-relation and dist-widen →
+  shrink; polarize and polarize-relation → amplify. The behavior of each
+  mechanic did not change. Answer files and moderator pins made before
+  this date use the old ids; with those files, chart type + old id gives
+  the mechanic directly.

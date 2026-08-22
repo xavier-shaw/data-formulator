@@ -25,7 +25,10 @@
  *                       (the provenance question).
  *
  *  Parts 4 and 5 also ask HOW SURE they are, on a 0-100 scale, before the
- *  answer is revealed.
+ *  answer is committed. Neither gives feedback: a confirm goes straight to
+ *  the next question, and only the researcher's eye toggle (bottom right)
+ *  shows what each look-alike changed (part 4) or which chart really came
+ *  next (part 5).
  *  • Results          — scores of whatever has been answered so far + download.
  *
  * Every tab is DIRECTLY reachable — a pilot can jump to part 5 without
@@ -48,6 +51,8 @@ import DownloadIcon from '@mui/icons-material/Download';
 import ReplayIcon from '@mui/icons-material/Replay';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useTranslation } from 'react-i18next';
 import { borderColor, radius } from '../app/tokens';
 import {
@@ -206,18 +211,20 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     const comboStartRef = useRef<number>(Date.now());
 
     // ── quiz state ──
-    // Each question runs in two phases:
-    //   pick     — the option matrix, text shown; pick one and confirm
-    //   revealed — the answer, and how far the chosen look-alike was
+    // Each question is one pick: choose an option, confirm, and the next
+    // question appears. The participant gets no feedback — neither the
+    // correct answer nor what a look-alike changed.
     const [index, setIndex] = useState(0);
     const [answers, setAnswers] = useState<QuizAnswer[]>([]);
-    // Confidence for the question on screen. Asked before the reveal, frozen
-    // by it, and reset for every question.
+    // Confidence for the question on screen, reset for every question.
     const [confidence, setConfidence] = useState(CONFIDENCE_DEFAULT);
     const [confidenceSet, setConfidenceSet] = useState(false);
-    const [phase, setPhase] = useState<'pick' | 'revealed'>('pick');
     const [picked, setPicked] = useState<string | null>(null);
     const [finished, setFinished] = useState(false);
+    // The researcher's eye toggle (bottom right): when on, each look-alike
+    // carries the chip that names its mechanism, and the real chart is
+    // outlined. Never shown to the participant by default.
+    const [showMechanism, setShowMechanism] = useState(false);
 
     // ── part 5: reasoning trace ──
     // One question form: which chart came next, and why (the provenance
@@ -228,7 +235,7 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     useEffect(() => {
         const runId = ++runIdRef.current;
         setQuiz(null); setError(null); setIndex(0); setAnswers([]);
-        setPhase('pick'); setPicked(null);
+        setPicked(null);
         setFinished(false);
         setTraceMaterial(null); setTraceProvAnswer(null);
         (async () => {
@@ -313,15 +320,15 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     const options = useMemo(() => (item ? shuffledOptions(item) : []), [item]);
     const correctCount = answers.filter(a => a.correct).length;
 
-    /** Select an option. Nothing is scored until the phase is confirmed. */
+    /** Select an option. Nothing is scored until the pick is confirmed. */
     const handlePick = useCallback((optionId: string) => {
-        if (phase === 'revealed') return;
         setPicked(optionId);
-    }, [phase]);
+    }, []);
 
-    /** Confirm the pick: record and score it. */
+    /** Confirm the pick: record it, score it, and go straight to the next
+     *  question. No feedback is given. */
     const handleConfirm = useCallback(() => {
-        if (!item || !picked) return;
+        if (!quiz || !item || !picked) return;
         const chosen = item.options.find(o => o.id === picked);
         const correct = picked === item.correctId;
         setAnswers(prev => [...prev, {
@@ -342,21 +349,16 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             confidence,
             confidenceSet,
         }]);
-        setPhase('revealed');
-    }, [item, picked, index, confidence, confidenceSet]);
-
-    const handleNext = useCallback(() => {
-        if (!quiz) return;
         // After the last question the guided flow moves on to part 5.
         if (index + 1 >= quiz.items.length) { setFinished(true); setTab('trace'); return; }
         setIndex(i => i + 1);
-        setPhase('pick'); setPicked(null);
+        setPicked(null);
         setConfidence(CONFIDENCE_DEFAULT); setConfidenceSet(false);
-    }, [quiz, index]);
+    }, [quiz, item, picked, index, confidence, confidenceSet]);
 
     /** Restart part 4 only; the other parts' answers are kept. */
     const handleRetake = useCallback(() => {
-        setIndex(0); setAnswers([]); setPhase('pick'); setPicked(null);
+        setIndex(0); setAnswers([]); setPicked(null);
         setConfidence(CONFIDENCE_DEFAULT); setConfidenceSet(false);
         setFinished(false); setTab('charts');
     }, []);
@@ -446,6 +448,11 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     // A tick marks parts that already have an answer, so a pilot jumping
     // around can see what is still open.
     const tick = (done: boolean, label: string) => (done ? `${label} ✓` : label);
+    // The tabs are NUMBERED ONLY. Naming the parts up there would tell a
+    // participant on part 1 that attributes, charts and a path are coming,
+    // and every later part is a memory test the name would prepare them for.
+    // What each part asks stays on its own intro page.
+    const partTab = (n: number) => t('quiz.tabPart', { n, defaultValue: `Part ${n}` });
     const tabs = (
         <Tabs
             value={tab}
@@ -453,11 +460,11 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             sx={{ minHeight: 34, borderBottom: `1px solid ${borderColor.view}`, flexShrink: 0,
                   '& .MuiTab-root': { minHeight: 34, fontSize: 12, textTransform: 'none', py: 0, minWidth: 0 } }}
         >
-            <Tab value="ask" label={tick(!!askAnswer, t('quiz.tabAsk', { defaultValue: '1 · Questions' }))} />
-            <Tab value="recall" label={tick(!!recallAnswer, t('quiz.tabRecall', { defaultValue: '2 · Attributes' }))} />
-            <Tab value="combos" label={tick(!!comboAnswer, t('quiz.tabCombos', { defaultValue: '3 · Combinations' }))} />
-            <Tab value="charts" label={tick(finished, t('quiz.tabCharts', { defaultValue: '4 · Charts' }))} />
-            <Tab value="trace" label={tick(!!traceProvAnswer, t('quiz.tabTrace', { defaultValue: '5 · Path' }))} />
+            <Tab value="ask" label={tick(!!askAnswer, partTab(1))} />
+            <Tab value="recall" label={tick(!!recallAnswer, partTab(2))} />
+            <Tab value="combos" label={tick(!!comboAnswer, partTab(3))} />
+            <Tab value="charts" label={tick(finished, partTab(4))} />
+            <Tab value="trace" label={tick(!!traceProvAnswer, partTab(5))} />
             <Tab value="results" label={t('quiz.tabResults', { defaultValue: 'Results' })} />
         </Tabs>
     );
@@ -478,31 +485,29 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
     );
 
     const optionCard = (opt: QuizOption, cellH: number | string) => {
-        const revealed = phase === 'revealed';
         const isCorrect = item && opt.id === item.correctId;
         const isPicked = picked === opt.id;
 
-        // Selecting is a neutral highlight; right/wrong colour appears only
-        // once the answer is confirmed.
+        // Selecting is a neutral highlight. The right answer is never marked
+        // for the participant; only the researcher's eye toggle outlines it.
         let bc = borderColor.view, sh = 'none';
-        if (revealed) {
-            if (isCorrect) { bc = theme.palette.success.main; sh = `0 0 0 3px ${alpha(theme.palette.success.main, 0.18)}`; }
-            else if (isPicked) { bc = theme.palette.error.main; sh = `0 0 0 3px ${alpha(theme.palette.error.main, 0.18)}`; }
-        } else if (isPicked) {
+        if (isPicked) {
             bc = theme.palette.primary.main; sh = `0 0 0 3px ${alpha(theme.palette.primary.main, 0.16)}`;
+        } else if (showMechanism && isCorrect) {
+            bc = theme.palette.success.main; sh = `0 0 0 3px ${alpha(theme.palette.success.main, 0.18)}`;
         }
 
         return (
             <Box key={opt.id} sx={{ position: 'relative', display: 'flex' }}>
                 <Box
-                    component="button" disabled={revealed}
+                    component="button"
                     onClick={() => handlePick(opt.id)}
                     aria-pressed={isPicked}
-                    sx={{ flex: 1, p: 0.75, background: '#fff', cursor: revealed ? 'default' : 'pointer',
+                    sx={{ flex: 1, p: 0.75, background: '#fff', cursor: 'pointer',
                           border: `2px solid ${bc}`, boxShadow: sh, borderRadius: radius.sm,
                           display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: size.optionMin,
                           transition: 'border-color .12s, box-shadow .12s',
-                          '&:hover': revealed ? {} : { borderColor: theme.palette.primary.main } }}
+                          '&:hover': { borderColor: theme.palette.primary.main } }}
                 >
                     <img
                         // Width 100% scales the SVG up to the card, so the
@@ -512,9 +517,9 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                         style={{ width: '100%', height: cellH, objectFit: 'contain' }}
                     />
                 </Box>
-                {/* After the answer, name what each look-alike changed: its
-                    axis, its band or dimension, and the operation. */}
-                {revealed && opt.method && (
+                {/* With the eye toggle on, name what each look-alike changed:
+                    its axis, its band or dimension, and the operation. */}
+                {showMechanism && opt.method && (
                     <Chip
                         size="small"
                         label={`${lureTag(opt)} · ${opt.label}`}
@@ -733,7 +738,9 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
         </Box>
     );
 
-    /** The part's display name: the tab label without its "N · " prefix. */
+    /** The part's display name, for the heading of its own INTRO page — the
+     *  tabs carry the number alone. The "N · " prefix the keys still hold is
+     *  dropped, so the heading reads as a name. */
     const partName = (key: string, def: string) => t(key, { defaultValue: def }).replace(/^\d+ · /, '');
 
     // ── part 1: the questions they would ask next ────────────────────────
@@ -749,6 +756,10 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 questions={askQuestions}
                 onChange={setAskQuestions}
                 onContinue={handleFinishAsk}
+                // The same table parts 2 and 3 open on.  It loads on mount,
+                // independent of the tab, so it is usually here already; the
+                // part renders without it either way and never waits.
+                table={recallMaterial?.table}
                 wide={wide}
             />
         );
@@ -871,8 +882,6 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
             );
         }
         const grid = optionGrid(options.length);
-        const chosen = picked ? item!.options.find(o => o.id === picked) : undefined;
-        const gotIt = picked === item!.correctId;
         return (
             <Box sx={{ p: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -891,36 +900,44 @@ export const QuizPanel: FC<QuizPanelProps> = ({ sessionId, sessionName, liveStat
                 <Box sx={{ display: 'grid', gridTemplateColumns: grid.cols, gap: wide ? 1.25 : 1, mb: 1.25 }}>
                     {options.map(o => optionCard(o, grid.h))}
                 </Box>
-                {/* The verdict sits ABOVE the rating row, so the row that ends
-                    the question is always the rating and the button that
-                    commits it. */}
-                <Typography sx={{ fontSize: 12, mb: 0.5, minHeight: 20, color: gotIt ? 'success.main' : 'error.main' }}>
-                    {phase === 'revealed'
-                        ? (gotIt
-                            ? t('quiz.verdictCorrect', { defaultValue: 'Correct — that is the chart from your session.' })
-                            : t('quiz.verdictWrong', { form: chosen?.specDist, values: chosen?.dataDist,
-                                defaultValue: `Not this one — it is a look-alike (form ${chosen?.specDist}, values ${chosen?.dataDist}). The real chart is outlined in green.` }))
-                        : ''}
-                </Typography>
                 {/* Below the charts: the rating is about the pick, and the
-                    reveal freezes it. */}
+                    confirm commits both and moves on. */}
                 <ConfidenceRater
                     value={confidence}
                     onChange={setConfidence}
                     onTouch={() => setConfidenceSet(true)}
-                    disabled={phase === 'revealed'}
-                    action={phase === 'pick' ? (
+                    action={
                         <Button variant="contained" disabled={!picked} onClick={handleConfirm}
                             sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
                             {t('quiz.confirm', { defaultValue: 'Confirm' })}
                         </Button>
-                    ) : (
-                        <Button variant="contained" onClick={handleNext}
-                            sx={{ fontSize: 13, textTransform: 'none', px: 2.5 }}>
-                            {t('quiz.confirm', { defaultValue: 'Confirm' })}
-                        </Button>
-                    )}
+                    }
                 />
+                {/* The researcher's eye: sits just above the system-messages
+                    info button (MessageSnackbar, bottom 16 right 16). On, it
+                    shows each look-alike's mechanism and outlines the real
+                    chart; the participant never sees this by default. */}
+                <Tooltip placement="left" title={showMechanism
+                    ? t('quiz.mechanismHide', { defaultValue: 'Hide the look-alike mechanisms' })
+                    : t('quiz.mechanismShow', { defaultValue: 'Show the look-alike mechanisms' })}>
+                    <IconButton
+                        onClick={() => setShowMechanism(v => !v)}
+                        sx={{
+                            position: 'fixed', bottom: 52, right: 16,
+                            width: 30, height: 30, zIndex: 10,
+                            backgroundColor: 'white',
+                            border: '1px solid',
+                            borderColor: showMechanism ? 'primary.main' : 'grey.400',
+                            color: showMechanism ? 'primary.main' : 'text.disabled',
+                            boxShadow: '0 0 6px rgba(0,0,0,0.1)',
+                            opacity: showMechanism ? 1 : 0.6,
+                            transition: 'all 0.3s ease',
+                            '&:hover': { transform: 'scale(1.1)', backgroundColor: 'white' },
+                        }}
+                    >
+                        {showMechanism ? <VisibilityIcon sx={{ fontSize: 18 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 18 }} />}
+                    </IconButton>
+                </Tooltip>
             </Box>
         );
     };

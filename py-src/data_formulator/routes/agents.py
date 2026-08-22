@@ -364,11 +364,11 @@ def analyst_streaming():
     agent_exploration_rules = content.get("agent_exploration_rules", "")
     # User-study behavioral profile for the standard agent. "executor" caps the
     # run to a few committing actions and tells the agent to execute exactly what
-    # was asked; "analyst" lets it explore autonomously (full delegation);
-    # "analyst_guided" anchors on the user's instruction and always extends
-    # beyond it along that direction. When set, these presets are the source of
-    # truth and override max_iterations / exploration rules. Absent (None)
-    # preserves legacy behavior; "mini" ignores it.
+    # was asked; "analyst_guided" treats the instruction as both the task and the
+    # goal — the agent loops until its own judgment says the goal is satisfied,
+    # then closes. When set, these presets are the source of truth and override
+    # max_iterations / exploration rules. Absent (None) preserves legacy
+    # behavior; "mini" ignores it.
     analysis_mode = content.get("analysis_mode")
     agent_coding_rules = content.get("agent_coding_rules", "")
     focused_thread = content.get("focused_thread", None)
@@ -380,13 +380,13 @@ def analyst_streaming():
     completed_step_count = content.get("completed_step_count", 0)
 
     # Apply the study behavioral profile (standard agent only). Each mode is a
-    # markdown file in analyst/modes/ (default.md / executor.md / analyst.md /
+    # markdown file in analyst/modes/ (default.md / executor.md /
     # analyst_guided.md); the server loads it so the experiment stays reproducible
     # and tamper-resistant. A mode may override max_iterations (Executor 5,
-    # Analyst-guided 7, Analyst 8; Default leaves the request's value).
+    # Analyst-guided 7; Default leaves the request's value).
     # Default = no profile (the untouched control).
     prompt_profile = None
-    if agent_mode != "mini" and analysis_mode in ("executor", "analyst", "analyst_guided"):
+    if agent_mode != "mini" and analysis_mode in ("executor", "analyst_guided"):
         mode = load_mode(analysis_mode)
         if mode.max_iterations is not None:
             max_iterations = mode.max_iterations

@@ -136,7 +136,7 @@ const LiveStatus: React.FC<{ startTime?: number; resetKey?: string }> = ({ start
         : `${Math.floor(secs / 60)}m${secs % 60}s`;
     return (
         <Typography component="span" sx={{
-            fontSize: 10,
+            fontSize: 12,
             color: 'text.disabled',
             fontVariantNumeric: 'tabular-nums',
             ml: '6px',
@@ -189,7 +189,7 @@ export const ThinkingBanner = (message: string, sx?: SxProps, active: boolean = 
             } : {}),
             ...sx,
         }}>
-            <Typography variant="body2" sx={{ fontSize: 10, color: 'text.secondary' }}>
+            <Typography variant="body2" sx={{ fontSize: 12, color: 'text.secondary' }}>
                 {message}
             </Typography>
             {showTimer && <LiveStatus startTime={startTime} resetKey={message} />}
@@ -283,7 +283,7 @@ const StreamingSettingsPopup = memo<{
                 <Paper
                     elevation={8}
                     sx={{
-                        fontSize: 12,
+                        fontSize: 14,
                         p: 1.5,
                         mt: 1,
                         ...ViewBorderStyle,
@@ -300,7 +300,7 @@ const StreamingSettingsPopup = memo<{
                                     />
                                 }
                                 label={
-                                    <Typography variant="body2" sx={{ fontSize: 11 }}>
+                                    <Typography variant="body2" sx={{ fontSize: 13 }}>
                                         {t('dataThread.watchForUpdates')}
                                     </Typography>
                                 }
@@ -308,7 +308,7 @@ const StreamingSettingsPopup = memo<{
                             />
                             {autoRefresh && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 100 }}>
-                                    <Typography variant="body2" sx={{ fontSize: 11, color: 'text.secondary' }}>
+                                    <Typography variant="body2" sx={{ fontSize: 13, color: 'text.secondary' }}>
                                         {t('dataThread.every')}
                                     </Typography>
                                     <TextField
@@ -325,7 +325,7 @@ const StreamingSettingsPopup = memo<{
                                         }}
                                         sx={{ 
                                             minWidth: 70,
-                                            '& .MuiInputBase-root': { fontSize: 11, height: 28 },
+                                            '& .MuiInputBase-root': { fontSize: 13, height: 32 },
                                             '& .MuiSelect-select': { py: 0.5 }
                                         }}
                                     >
@@ -345,9 +345,9 @@ const StreamingSettingsPopup = memo<{
                                     disabled={isRefreshing}
                                     startIcon={isRefreshing ? <CircularProgress size={14} /> : <RefreshIcon sx={{ fontSize: 14 }} />}
                                     sx={{
-                                        fontSize: 11,
+                                        fontSize: 13,
                                         textTransform: 'none',
-                                        height: 28,
+                                        height: 32,
                                         alignSelf: 'flex-start'
                                     }}
                                 >
@@ -394,7 +394,7 @@ const MetadataPopup = memo<{
                         width: 480,
                         maxHeight: '70vh',
                         overflow: 'auto',
-                        fontSize: 12,
+                        fontSize: 14,
                         p: 2,
                         mt: 1,
                         ...ViewBorderStyle,
@@ -405,24 +405,24 @@ const MetadataPopup = memo<{
                     </Typography>
 
                     {description && (
-                        <Typography sx={{ fontSize: 11.5, color: 'text.primary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        <Typography sx={{ fontSize: 13.5, color: 'text.primary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                             {description}
                         </Typography>
                     )}
 
                     {!description && codeExplanation && (
                         <Box>
-                            <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary', mb: 0.5 }}>
+                            <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary', mb: 0.5 }}>
                                 {t('dataThread.derivationSummary', { defaultValue: 'Derivation summary' })}
                             </Typography>
-                            <Typography sx={{ fontSize: 11.5, color: 'text.primary', whiteSpace: 'pre-wrap' }}>
+                            <Typography sx={{ fontSize: 13.5, color: 'text.primary', whiteSpace: 'pre-wrap' }}>
                                 {codeExplanation}
                             </Typography>
                         </Box>
                     )}
 
                     {!description && !codeExplanation && (
-                        <Typography sx={{ fontSize: 11.5, color: 'text.disabled', fontStyle: 'italic' }}>
+                        <Typography sx={{ fontSize: 13.5, color: 'text.disabled', fontStyle: 'italic' }}>
                             {t('dataThread.noMetadata', { defaultValue: 'No description available for this table.' })}
                         </Typography>
                     )}
@@ -480,9 +480,9 @@ const RenameTablePopup = memo<{
             <ClickAwayListener onClickAway={onClose}>
                 <Paper
                     elevation={8}
-                    sx={{ width: 240, fontSize: 12, p: 1.5, mt: 1, ...ViewBorderStyle }}
+                    sx={{ width: 240, fontSize: 14, p: 1.5, mt: 1, ...ViewBorderStyle }}
                 >
-                    <Typography variant="subtitle2" sx={{ mb: 0.5, fontSize: 12 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 0.5, fontSize: 14 }}>
                         {t('dataThread.renameTable')}
                     </Typography>
                     <TextField
@@ -493,7 +493,7 @@ const RenameTablePopup = memo<{
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        sx={{ my: 0.5, '& .MuiInputBase-input': { fontSize: 12 } }}
+                        sx={{ my: 0.5, '& .MuiInputBase-input': { fontSize: 14 } }}
                     />
                     <Box sx={{ mt: 0.5, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
                         <Button size="small" onClick={onClose}>{t('app.cancel')}</Button>
@@ -538,7 +538,7 @@ const WorkspacePanel: FC<{
         py: '3px',
         borderRadius: '3px',
         cursor: 'pointer',
-        fontSize: 11,
+        fontSize: 13,
         transition: transition.fast,
         backgroundColor: isActive ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
         '&:hover': {
@@ -635,7 +635,7 @@ const WorkspacePanel: FC<{
                         <ExpandMoreIcon sx={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }} /> :
                         <ChevronRightIcon sx={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }} />
                     }
-                    <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: '0.5px', ml: 0.5 }}>
+                    <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.55)', textTransform: 'uppercase', letterSpacing: '0.5px', ml: 0.5 }}>
                         {t('dataThread.workspace')}
                     </Typography>
                 </Box>
@@ -650,7 +650,7 @@ const WorkspacePanel: FC<{
                     }}
                 >
                     <AddIcon sx={{ fontSize: 14 }} />
-                    <Typography sx={{ fontSize: 11, fontWeight: 600 }}>{t('dataThread.addData')}</Typography>
+                    <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{t('dataThread.addData')}</Typography>
                 </Box>
             </Box>
 
@@ -701,7 +701,7 @@ const WorkspacePanel: FC<{
                                         {getTableIcon(table)}
                                         <Box sx={{ flex: 1, minWidth: 0 }}>
                                             <Typography sx={{
-                                                fontSize: 11,
+                                                fontSize: 13,
                                                 fontWeight: isTableActive ? 600 : 400,
                                                 color: isTableActive ? 'primary.main' : 'text.primary',
                                                 overflow: 'hidden',
@@ -712,7 +712,7 @@ const WorkspacePanel: FC<{
                                             </Typography>
                                             {originalName && (
                                                 <Typography sx={{
-                                                    fontSize: 9,
+                                                    fontSize: 11,
                                                     color: 'text.disabled',
                                                     lineHeight: 1.2,
                                                     mt: '2px',
@@ -780,7 +780,7 @@ const WorkspacePanel: FC<{
                                                 >
                                                     {getChartIcon(chart.chartType)}
                                                     <Typography sx={{
-                                                        fontSize: 11,
+                                                        fontSize: 13,
                                                         fontWeight: isChartActive ? 600 : 400,
                                                         color: isChartActive ? 'primary.main' : 'text.primary',
                                                         overflow: 'hidden',
@@ -1359,13 +1359,13 @@ let SingleThreadGroupView: FC<{
                         type: 'merge',
                         highlighted,
                         element: (
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '6px', rowGap: 0, color: mergeColor, fontSize: '11px' }}>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '6px', rowGap: 0, color: mergeColor, fontSize: '13px' }}>
                                 <Typography component="span" sx={{ fontSize: 'inherit', color: 'inherit' }}>
                                     {t('dataThread.usingSources')}
                                 </Typography>
                                 {mergeNames.map((name, idx) => (
                                     <Box key={`${name}-${idx}`} component="span" sx={{ display: 'inline-flex', alignItems: 'center', columnGap: '3px' }}>
-                                        <TableIcon sx={{ fontSize: '11px', color: 'inherit' }} />
+                                        <TableIcon sx={{ fontSize: '13px', color: 'inherit' }} />
                                         <Typography component="span" sx={{ fontSize: 'inherit', color: 'inherit' }}>
                                             {name}
                                         </Typography>
@@ -1554,7 +1554,7 @@ let SingleThreadGroupView: FC<{
                     highlighted,
                     isClarifying: true,
                     tableId,
-                    element: <Typography variant="body2" sx={{ fontSize: 10, color: theme.palette.warning.main, px: 1, py: 0.5 }}>{t('dataThread.waitingForClarification')}</Typography>,
+                    element: <Typography variant="body2" sx={{ fontSize: 12, color: theme.palette.warning.main, px: 1, py: 0.5 }}>{t('dataThread.waitingForClarification')}</Typography>,
                 });
             }
         }
@@ -1618,14 +1618,14 @@ let SingleThreadGroupView: FC<{
                 }}>
                     <Box sx={{ margin: '4px 8px 4px 6px', minWidth: 0, flex: 1 }}>
                         <Typography sx={{
-                            fontSize: 11, fontWeight: 500, color: 'text.primary',
+                            fontSize: 13, fontWeight: 500, color: 'text.primary',
                             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                             overflow: 'hidden', wordBreak: 'break-all',
                         }}>
                             {report.title || t('report.untitled')}
                         </Typography>
                         {isGenerating && (
-                            <Typography sx={{ fontSize: 9, color: 'text.disabled', lineHeight: 1.3, mt: 0.25 }}>
+                            <Typography sx={{ fontSize: 11, color: 'text.disabled', lineHeight: 1.3, mt: 0.25 }}>
                                 {t('report.composing')}
                             </Typography>
                         )}
@@ -1694,7 +1694,7 @@ let SingleThreadGroupView: FC<{
                 type: 'used-table',
                 highlighted: false,
                 element: (
-                    <Typography sx={{ fontSize: '10px', color: 'text.disabled' }}>
+                    <Typography sx={{ fontSize: '12px', color: 'text.disabled' }}>
                         …
                     </Typography>
                 ),
@@ -2158,7 +2158,7 @@ let SingleThreadGroupView: FC<{
                     </Box>
                     <Box sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', pl: 0.5, gap: 0.5 }}>
                         <Typography sx={{ 
-                            fontSize: '11px', fontWeight: 700, 
+                            fontSize: '13px', fontWeight: 700, 
                             textTransform: 'uppercase', letterSpacing: '0.02em',
                             color: headerHL ? hlColor : 'rgba(0,0,0,0.55)', 
                         }}>
@@ -2187,7 +2187,7 @@ let SingleThreadGroupView: FC<{
                         </Box>
                         <Box sx={{ flex: 1, minWidth: 0, pl: 0.5, py: 0.25, display: 'flex', alignItems: 'center' }}>
                             <Typography sx={{
-                                fontSize: '10px', color: 'text.disabled',
+                                fontSize: '12px', color: 'text.disabled',
                                 textTransform: 'uppercase', letterSpacing: '0.04em',
                             }}>
                                 {t('dataThread.continuedFromAbove')}
@@ -2210,7 +2210,7 @@ let SingleThreadGroupView: FC<{
                         </Box>
                         <Box sx={{ flex: 1, minWidth: 0, pl: 0.5, py: 0.25, display: 'flex', alignItems: 'center' }}>
                             <Typography sx={{
-                                fontSize: '10px', color: 'text.disabled',
+                                fontSize: '12px', color: 'text.disabled',
                                 textTransform: 'uppercase', letterSpacing: '0.04em',
                             }}>
                                 {t('dataThread.continuesBelow')}
@@ -2250,7 +2250,7 @@ let SingleThreadGroupView: FC<{
                     }
                     handleCloseTableMenu();
                 }}
-                sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1 }}
+                sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}
             >
                 <EditIcon sx={{ fontSize: 16, color: 'text.secondary' }}/>
                 {t('dataThread.rename')}
@@ -2265,7 +2265,7 @@ let SingleThreadGroupView: FC<{
                         }
                         handleCloseTableMenu();
                     }}
-                    sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1 }}
+                    sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}
                 >
                     <AnchorIcon sx={{ fontSize: 16, color: selectedTableForMenu?.anchored ? 'primary.main' : 'text.secondary' }}/>
                     {selectedTableForMenu?.anchored ? t('dataThread.unpinTable') : t('dataThread.pinTable')}
@@ -2282,7 +2282,7 @@ let SingleThreadGroupView: FC<{
                         }
                         handleCloseTableMenu();
                     }}
-                    sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1 }}
+                    sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}
                 >
                     <AttachFileIcon sx={{ 
                         fontSize: 16,
@@ -2303,7 +2303,7 @@ let SingleThreadGroupView: FC<{
                         }
                         handleCloseTableMenu();
                     }}
-                    sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1 }}
+                    sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}
                 >
                     <StreamIcon sx={{ fontSize: 16, color: selectedTableForMenu.source?.autoRefresh ? 'success.main' : 'text.secondary' }}/>
                     {selectedTableForMenu.source?.autoRefresh ? t('dataThread.refreshSettings') : t('dataThread.watchForUpdates')}
@@ -2318,7 +2318,7 @@ let SingleThreadGroupView: FC<{
                             handleOpenRefreshDialog(selectedTableForMenu);
                         }
                     }}
-                    sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1 }}
+                    sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1 }}
                 >
                     <RefreshIcon sx={{ fontSize: 16, color: 'primary.main' }}/>
                     {t('dataThread.replaceData')}
@@ -2355,7 +2355,7 @@ let SingleThreadGroupView: FC<{
                 disabled={selectedTableForMenu 
                     ? (!selectedTableForMenu.derive && tables.some(t => t.derive?.trigger.tableId === selectedTableForMenu.id)) 
                     : true}
-                sx={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 1, color: 'warning.main' }}
+                sx={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 1, color: 'warning.main' }}
             >
                 <DeleteIcon sx={{ fontSize: 16 }} color='warning'/>
                 {t('dataThread.deleteTable')}
@@ -2601,7 +2601,15 @@ function computeSplitExtraLeaves(
         const triggers = triggersByLeaf[li];
         if (triggers.length < 3) continue;
 
-        const K = Math.max(1, Math.round(threadItems[li] / budget));
+        // Both partitioners require ≥ 2 triggers per segment, so a chain of
+        // N triggers supports at most floor(N / 2) segments.  Cap K there:
+        // without the cap, a K the chain cannot support makes BOTH
+        // partitioners return [] and the thread renders as ONE tall column —
+        // i.e. a wider pane (larger K) could produce LESS splitting than a
+        // narrow one.  Capping falls back to the coarser split the chain can
+        // actually carry.
+        const maxFeasibleK = Math.floor(triggers.length / 2);
+        const K = Math.max(1, Math.min(Math.round(threadItems[li] / budget), maxFeasibleK));
         if (K <= 1) continue;
 
         // Per-trigger items, with the leaf weight folded into the LAST entry
@@ -2906,6 +2914,21 @@ function chooseBestColumnLayout(
     return bestLayout;
 }
 
+// ── Chatbox footprint (drives the split/packing viewport estimate) ───
+// Fallback used only until the first real measurement lands (~400ms after
+// mount): the footprint of the input card WITHOUT the suggestion strip.
+const CHATBOX_FALLBACK_HEIGHT = 120;
+// A settled footprint is committed only when it differs from the committed
+// one by at least this much, so that a suggestion chip wrapping onto one
+// more line does not re-split the threads.  Ignored when the resting LAYOUT
+// changes (strip appears/collapses, input folds away) — that is a real
+// change in the footprint, not noise.
+const CHATBOX_FOOTPRINT_HYSTERESIS = 28;
+// Debounce after the last size change before reading the footprint.  Longer
+// than the 200ms MUI Collapse animations in the chatbox, so we never read a
+// mid-animation height; every new size tick restarts it.
+const CHATBOX_SETTLE_MS = 400;
+
 export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     const { t } = useTranslation();
     const dispatch = useDispatch<AppDispatch>();
@@ -2964,6 +2987,16 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     // changes (e.g. user just clicks into the input without typing).
     const [chatboxFocusTick, setChatboxFocusTick] = useState(0);
     const [isDragOver, setIsDragOver] = useState(false);
+    // Measured footprint of the chatbox at its resting size (null until the
+    // first measurement settles).  See the effect below.
+    const [chatboxFootprint, setChatboxFootprint] = useState<number | null>(null);
+    const [chatboxResting, setChatboxResting] = useState<{ atRest: boolean; key: string }>(
+        { atRest: false, key: '' });
+    const committedChatboxRef = useRef<{ height: number; key: string } | null>(null);
+    const handleChatboxRestingChange = useCallback((atRest: boolean, key: string) => {
+        setChatboxResting(prev => (prev.atRest === atRest && prev.key === key
+            ? prev : { atRest, key }));
+    }, []);
 
     // ── Drop handler for catalog table items from DataSourceSidebar ──────
     const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -3035,6 +3068,32 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
+
+    // Snapshot the chatbox footprint while the box sits at its resting size.
+    //
+    // The thread area (containerRef, flex: 1) and the chatbox are the only
+    // two children of the outer wrapper, so `outerHeight - containerHeight`
+    // is exactly the space the chatbox takes — margins included — as already
+    // resolved by flexbox.  We commit it only while SimpleChartRecBox reports
+    // that it is at rest, and only after the size stops changing, so the
+    // split threshold stays put while the box grows for a clarification, a
+    // draft, or an in-flight run.
+    useEffect(() => {
+        if (!chatboxResting.atRest) return;
+        const timer = setTimeout(() => {
+            const outer = outerRef.current?.clientHeight ?? 0;
+            if (outer <= 0 || containerHeight <= 0) return;
+            const footprint = Math.round(outer - containerHeight);
+            // Guard against readings taken while the panes are collapsed.
+            if (footprint <= 0 || footprint >= outer) return;
+            const committed = committedChatboxRef.current;
+            if (committed && committed.key === chatboxResting.key
+                && Math.abs(committed.height - footprint) < CHATBOX_FOOTPRINT_HYSTERESIS) return;
+            committedChatboxRef.current = { height: footprint, key: chatboxResting.key };
+            setChatboxFootprint(footprint);
+        }, CHATBOX_SETTLE_MS);
+        return () => clearTimeout(timer);
+    }, [chatboxResting, containerHeight]);
 
     const theme = useTheme();
 
@@ -3160,7 +3219,7 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                 unread: !!chart.unread,
                 ...(reportEligible ? {
                     addedToReport,
-                    addToReportTooltip: addedToReport ? t('findings.removeChart') : t('report.addToFindings'),
+                    addToReportTooltip: addedToReport ? t('report.removeFromFindings') : t('report.addToFindings'),
                     onAddToReport: () => {
                         // Toggle membership in the findings collection; on add,
                         // the panel opens so the chart lands visibly.
@@ -3188,14 +3247,16 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
     let leafTables = [ ...tables.filter(t => isLeafTable(t)) ];
 
     // Stable viewport estimate for split decisions.  We measure the OUTER
-    // wrapper (thread area + chatbox) and subtract a fixed baseline for the
-    // collapsed chatbox footprint.  This keeps the split threshold stable
-    // when the chatbox expands during clarification/explanation, avoiding
-    // re-splitting of threads as the chatbox grows or shrinks.
-    const CHATBOX_BASELINE_HEIGHT = 120; // approximate collapsed-chatbox footprint in px
+    // wrapper (thread area + chatbox) and subtract the chatbox footprint at
+    // its RESTING size (measured above, not guessed).  This keeps the split
+    // threshold stable when the chatbox expands during clarification /
+    // explanation, avoiding re-splitting of threads as the chatbox grows or
+    // shrinks, while still tracking the real resting height — which the
+    // suggestion strip made much taller than the old fixed 120px guess.
+    const chatboxBaseline = chatboxFootprint ?? CHATBOX_FALLBACK_HEIGHT;
     const outerHeight = outerRef.current?.clientHeight ?? 0;
-    const viewportHeight = outerHeight > CHATBOX_BASELINE_HEIGHT
-        ? outerHeight - CHATBOX_BASELINE_HEIGHT
+    const viewportHeight = outerHeight > chatboxBaseline
+        ? outerHeight - chatboxBaseline
         : (containerRef.current?.clientHeight
             || (typeof window !== 'undefined' ? window.innerHeight : 800));
     // Determine how many columns can fit in the current container width.  When
@@ -3563,7 +3624,10 @@ export const DataThread: FC<{sx?: SxProps}> = function ({ sx }) {
                 }}>
                 {view}
             </Box>
-            <SimpleChartRecBox onInputFocus={() => setChatboxFocusTick(t => t + 1)} />
+            <SimpleChartRecBox
+                onInputFocus={() => setChatboxFocusTick(t => t + 1)}
+                onRestingChange={handleChatboxRestingChange}
+            />
         </Box>
     );
 }

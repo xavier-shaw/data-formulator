@@ -244,7 +244,7 @@ export let buildTableCard = (props: BuildTableCardProps) => {
                     dispatch(dfActions.setFocused({ type: 'table', tableId }));
                 }}
             >
-                <Stack direction="row" sx={{ marginLeft: 0.25, marginRight: 'auto', fontSize: 12 }} alignItems="center" gap={"2px"}>
+                <Stack direction="row" sx={{ marginLeft: 0.25, marginRight: 'auto', fontSize: 14 }} alignItems="center" gap={"2px"}>
                     <AnchorIcon sx={{ fontSize: 14, color: 'rgba(0,0,0,0.5)' }} />
                     <Box>
                         <Typography fontSize="inherit" sx={{
@@ -258,7 +258,7 @@ export let buildTableCard = (props: BuildTableCardProps) => {
                         </Typography>
                         {anchoredOriginalName && (
                             <Typography sx={{
-                                fontSize: 9,
+                                fontSize: 11,
                                 color: 'text.disabled',
                                 lineHeight: 1.2,
                                 mt: 0.5,
@@ -313,7 +313,7 @@ export let buildTableCard = (props: BuildTableCardProps) => {
             }}>{table?.displayId || tableId}</Typography>
             {showOriginalName && originalName && (
                 <Typography sx={{
-                    fontSize: 10,
+                    fontSize: 12,
                     color: 'text.disabled',
                     lineHeight: 1.3,
                     mt: 0.5,
@@ -357,7 +357,7 @@ export let buildTableCard = (props: BuildTableCardProps) => {
                 '& .delete-table-btn': { opacity: 0, transition: 'opacity 0.15s' },
                 '&:hover .delete-table-btn': { opacity: 1 },
             }}>
-                <Stack direction="row" sx={{ marginLeft: 0.5, marginRight: 'auto', fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden' }} alignItems="center" gap={"2px"}>
+                <Stack direction="row" sx={{ marginLeft: 0.5, marginRight: 'auto', fontSize: 14, flex: 1, minWidth: 0, overflow: 'hidden' }} alignItems="center" gap={"2px"}>
                     {sourceTooltip
                         ? <Tooltip title={sourceTooltip} placement="top" arrow><span style={{ minWidth: 0, flex: 1 }}>{tableNameBlock}</span></Tooltip>
                         : tableNameBlock}

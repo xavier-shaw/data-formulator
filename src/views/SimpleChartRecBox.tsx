@@ -87,7 +87,7 @@ const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme
         }}>
             <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 0.75 }}>
                 <WritingPencil size={12} />
-                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500, fontSize: 11.5, lineHeight: 1.4 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500, fontSize: 13.5, lineHeight: 1.4 }}>
                     {t('chartRec.agentWorking')}
                 </Typography>
             </Box>
@@ -113,7 +113,7 @@ const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme
             )}
             <Typography variant="body2" sx={{
                 color: 'text.disabled',
-                fontSize: 11,
+                fontSize: 13,
                 textAlign: 'center',
                 display: '-webkit-box',
                 WebkitLineClamp: 3,
@@ -133,7 +133,15 @@ const AgentWorkingOverlay: FC<{ message?: string; elapsed?: number; theme: Theme
     );
 };
 
-export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ onInputFocus }) {
+export const SimpleChartRecBox: FC<{
+    onInputFocus?: () => void;
+    // Reports whether the box currently sits at its RESTING size, plus a key
+    // that identifies which resting layout it is in (strip shown/collapsed,
+    // input card vs. toggle row).  DataThread snapshots the chatbox footprint
+    // only while at rest, so a thread split stays put when the box grows for
+    // a clarification, a draft, or an in-flight run.
+    onRestingChange?: (atRest: boolean, layoutKey: string) => void;
+}> = function ({ onInputFocus, onRestingChange }) {
 
     const tables = useSelector((state: DataFormulatorState) => state.tables);
     const focusedId = useSelector((state: DataFormulatorState) => state.focusedId);
@@ -165,9 +173,13 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     // clears). Tracks the draftId we've already auto-submitted for.
     const clarifySubmittedRef = useRef<string | null>(null);
     const [isChatFormulating, setIsChatFormulating] = useState(false);
-    // Whether the getting-started starter questions are collapsed (click the
-    // lightning bolt to expand/collapse).
-    const [starterCollapsed, setStarterCollapsed] = useState(false);
+    // Analyst condition only: the chat input starts hidden behind an
+    // "Ask your own question" toggle row, so the suggestion strip reads as
+    // the primary way to proceed and typing is a deliberate opt-in — each
+    // send re-collapses the box (see the effect below), so every turn starts
+    // from the suggestions again. Clarification pauses, in-flight runs, and
+    // non-empty drafts force the box open regardless of this flag.
+    const [inputBoxOpen, setInputBoxOpen] = useState(false);
     const [mentionedTableIds, setMentionedTableIds] = useState<string[]>([]);
     const [mentionDropdownOpen, setMentionDropdownOpen] = useState(false);    const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
     const [attachedImages, setAttachedImages] = useState<string[]>([]);
@@ -199,6 +211,16 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         }
     }, [focusedId, isChatFormulating]);
 
+    // Re-collapse the Analyst-condition input on every send: all submit
+    // paths (typed send, Enter, suggestion click, replay, clarification
+    // resume) set isChatFormulating, and the forced-open rule keeps the box
+    // visible for the run itself. Dropping the flag here means that once the
+    // run finishes (and the cleared draft no longer forces it open), the box
+    // folds away and the next turn starts from the suggestions again.
+    useEffect(() => {
+        if (isChatFormulating) setInputBoxOpen(false);
+    }, [isChatFormulating]);
+
     // pendingClarification is now derived from Redux (stored on the agentAction itself)
     // so it persists when user clicks away and comes back.
 
@@ -211,6 +233,9 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
 
     const seedChatPrompt = useCallback((text: string) => {
         setChatPrompt(text);
+        // Seeding implies the user wants to edit — make sure the input box is
+        // visible even when the Analyst condition keeps it collapsed.
+        setInputBoxOpen(true);
         requestAnimationFrame(() => chatInputRef.current?.focus());
     }, []);
 
@@ -677,9 +702,6 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
         // Track the last agent display_instruction (from "action" events)
         let lastAgentDisplayInstruction: string | null = null;
         let lastAgentInputTables: string[] = [];
-        // Thread parent the analyst agent chose for the next chart (branch_from);
-        // null = continue the current thread. Orthogonal to input_tables.
-        let lastAgentBranchFrom: string | null = null;
 
         const genTableId = () => {
             let tableSuffix = Number.parseInt((Date.now() - Math.floor(Math.random() * 10000)).toString().slice(-6));
@@ -876,7 +898,6 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
             // ── action: agent chose what to do ──
             if (result.type === "action") {
                 lastAgentInputTables = result.input_tables || [];
-                lastAgentBranchFrom = result.branch_from || null;
                 if (result.action === "visualize") {
                     lastAgentDisplayInstruction = result.display_instruction || null;
                     thinkingSteps.push(t('dataThread.creatingChart') + (lastAgentDisplayInstruction ? ` ${lastAgentDisplayInstruction}` : ''));
@@ -907,30 +928,11 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 }
                 const displayInstruction = lastAgentDisplayInstruction || refinedGoal?.display_instruction || t('chartRec.explorationStep', { step: createdTables.length + 1, question });
 
-                // Thread placement — honored only in the ANALYST condition (typed
-                // analyst_guided runs). The agent may set branch_from to the NAME
-                // of any existing node to hang this chart under — a source table
-                // (new thread) or an earlier step's output (deepen that line).
-                // This is the ONLY thing that determines thread structure, and it
-                // is orthogonal to derive.source (what the code read). Search all
-                // tables incl. ones created earlier THIS run (createdTables, read
-                // live); unresolved → linear fallback. Executor/Default conditions
-                // never honor it → their threads are unchanged.
-                let resolvedBranchFrom: string | undefined = undefined;
-                if ((config.studyCondition ?? 'default') === 'analyst' && lastAgentBranchFrom) {
-                    const wanted = lastAgentBranchFrom.replace(/\.[^/.]+$/, "");
-                    const match = [...tables, ...createdTables].find(t2 => {
-                        // Mirror the input_tables resolver above: strip once per side.
-                        const name = t2.virtual?.tableId || t2.id.replace(/\.[^/.]+$/, "");
-                        return name === wanted;
-                    });
-                    if (match) {
-                        resolvedBranchFrom = match.id;
-                    } else {
-                        console.warn(`[analyst branch] branch_from '${lastAgentBranchFrom}' did not resolve; continuing the current thread`);
-                    }
-                }
-                const triggerTableId = resolvedBranchFrom || lastCreatedTableId || focusedTableId!;
+                // Thread placement is always linear: each chart continues the
+                // current thread (the agent's `branch_from` field is no longer
+                // honored — the merged analyst_guided mode omits it by prompt,
+                // and no other condition ever honored it).
+                const triggerTableId = lastCreatedTableId || focusedTableId!;
 
                 const candidateTable = createDictTable(candidateTableId, rows, undefined);
                 // Resolve source tables from agent's input_tables (names it chose to use)
@@ -972,7 +974,6 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 };
                 lastAgentDisplayInstruction = null;
                 lastAgentInputTables = [];
-                lastAgentBranchFrom = null;
                 thinkingSteps = []; // reset for next chart
                 pendingThought = ''; // reset for next chart
                 if (transformedData.virtual) {
@@ -1652,8 +1653,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                 label={`@${tbl?.displayId || id}`}
                                 onDelete={isDefault ? undefined : () => setMentionedTableIds(prev => prev.filter(mid => mid !== id))}
                                 sx={{
-                                    height: 20,
-                                    fontSize: 10,
+                                    height: 24,
+                                    fontSize: 12,
                                     color: theme.palette.text.secondary,
                                     backgroundColor: 'rgba(0,0,0,0.04)',
                                     border: 'none',
@@ -1672,8 +1673,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                             label={`image${attachedImages.length > 1 ? idx + 1 : ''}`}
                             onDelete={() => setAttachedImages(prev => prev.filter((_, i) => i !== idx))}
                             sx={{
-                                height: 20,
-                                fontSize: 10,
+                                height: 24,
+                                fontSize: 12,
                                 color: theme.palette.text.secondary,
                                 backgroundColor: 'rgba(0,0,0,0.04)',
                                 border: 'none',
@@ -1692,8 +1693,8 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                             label={file.name}
                             onDelete={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
                             sx={{
-                                height: 20,
-                                fontSize: 10,
+                                height: 24,
+                                fontSize: 12,
                                 maxWidth: 160,
                                 color: theme.palette.text.secondary,
                                 backgroundColor: 'rgba(0,0,0,0.04)',
@@ -1715,7 +1716,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                             <MenuItem
                                 key={opt.id}
                                 selected={idx === mentionHighlightIdx}
-                                sx={{ fontSize: 11, py: 0.5 }}
+                                sx={{ fontSize: 13, py: 0.5 }}
                                 onClick={() => confirmMention(opt.id)}
                             >
                                 @{opt.displayId || opt.id}
@@ -1728,13 +1729,13 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                 variant="standard"
                 sx={{
                     flex: 1,
-                    "& .MuiInput-input": { fontSize: '12px', lineHeight: 1.5 },
+                    "& .MuiInput-input": { fontSize: '14px', lineHeight: 1.5 },
                     "& .MuiInput-underline:before": { borderBottom: 'none !important' },
                     "& .MuiInput-underline:hover:not(.Mui-disabled):before": { borderBottom: 'none !important' },
                     "& .MuiInput-underline:after": { borderBottom: 'none !important' },
                     "& .MuiInputBase-root": { borderBottom: 'none !important' },
                     ...(isChatFormulating ? {
-                        "& .MuiInput-input": { fontSize: '12px', lineHeight: 1.5, color: 'text.disabled' },
+                        "& .MuiInput-input": { fontSize: '14px', lineHeight: 1.5, color: 'text.disabled' },
                     } : {}),
                 }}
                 onChange={(event: any) => {
@@ -1895,7 +1896,6 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                         aria-label={t('chartRec.getIdeaSuggestions')}
                                         disabled={!focusedTableId || isChatFormulating || !!pendingClarification}
                                         onClick={() => {
-                                            setStarterCollapsed(false);
                                             dispatch(generateSuggestions({ contextTableId: focusedTableId, force: true }));
                                         }}
                                     >
@@ -1927,7 +1927,7 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                                     height: 30,
                                     px: 1.5,
                                     borderRadius: '8px',
-                                    fontSize: '0.78rem',
+                                    fontSize: '0.9rem',
                                     fontWeight: 400,
                                     whiteSpace: 'nowrap',
                                     minWidth: 0,
@@ -2019,41 +2019,26 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
     // Vertical stack of suggestions, styled after the clarification panel's
     // option buttons so both suggestion surfaces read as the same affordance.
     const gettingStartedBlock = showGettingStarted ? (
-        <Box sx={{ mx: 1, mb: 0.75, px: 0.5, display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
+        <Box sx={{ mx: 1, mb: 1, px: 0.5, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
             {/* Header: icon + "What to explore next" label so the chips read
-                as next-step suggestions. The whole row toggles collapse. */}
-            <Tooltip title={t(starterCollapsed ? 'chartRec.expandStarters' : 'chartRec.collapseStarters', { defaultValue: starterCollapsed ? 'Show suggestions' : 'Hide suggestions' })}>
-                <Box
-                    onClick={() => setStarterCollapsed(c => !c)}
-                    sx={{
-                        display: 'flex', alignItems: 'center', gap: 0.5,
-                        alignSelf: 'flex-start',
-                        px: 0.5, py: '2px', borderRadius: '6px',
-                        cursor: 'pointer', userSelect: 'none',
-                        color: 'text.secondary',
-                        transition: 'background-color 0.15s, color 0.15s',
-                        '&:hover': { color: 'text.primary', backgroundColor: alpha(theme.palette.text.primary, 0.06) },
-                    }}
-                >
-                    <TipsAndUpdatesIcon sx={{ fontSize: 14, color: theme.palette.primary.main }} />
-                    <Typography sx={{ fontSize: 11, fontWeight: 500, color: 'inherit', lineHeight: 1 }}>
-                        {t('chartRec.whatToExploreNext', { defaultValue: 'What to explore next' })}
-                    </Typography>
-                    <ExpandMoreIcon sx={{
-                        fontSize: 14, color: 'text.disabled',
-                        transform: starterCollapsed ? 'rotate(-90deg)' : 'none',
-                        transition: 'transform 0.15s',
-                    }} />
-                </Box>
-            </Tooltip>
-            <Collapse
-                in={!starterCollapsed}
-                timeout={200}
+                as next-step suggestions. The strip is always open — the
+                suggestions are the Analyst condition's manipulation, so the
+                participant must not be able to hide them. */}
+            <Box
                 sx={{
-                    minWidth: 0,
-                    '& .MuiCollapse-wrapperInner': { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '4px', minWidth: 0 },
+                    display: 'flex', alignItems: 'center', gap: 0.5,
+                    alignSelf: 'flex-start',
+                    px: 0.5, py: '2px',
+                    userSelect: 'none',
+                    color: 'text.secondary',
                 }}
             >
+                <TipsAndUpdatesIcon sx={{ fontSize: 14, color: theme.palette.primary.main }} />
+                <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'inherit', lineHeight: 1 }}>
+                    {t('chartRec.whatToExploreNext', { defaultValue: 'What to explore next' })}
+                </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '8px', minWidth: 0 }}>
                 {starterLoading
                     ? <CircularProgress size={13} thickness={5} sx={{ color: 'text.disabled', m: 0.5 }} />
                     : (focusedStarterEntry?.questions ?? []).map((q, i) => (
@@ -2067,12 +2052,12 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                             // and tag the click for telemetry.
                             onClick={() => submitChat(q, undefined, undefined, 'suggestion', focusedStarterEntry?.questions)}
                             sx={{
-                                px: '8px', py: '4px',
+                                px: '8px', py: '6px',
                                 borderRadius: '6px',
                                 border: `1px solid ${alpha(theme.palette.text.primary, 0.12)}`,
                                 backgroundColor: theme.palette.background.paper,
                                 cursor: 'pointer',
-                                fontSize: 11,
+                                fontSize: 14,
                                 display: 'block',
                                 whiteSpace: 'normal',
                                 wordBreak: 'break-word',
@@ -2087,15 +2072,85 @@ export const SimpleChartRecBox: FC<{ onInputFocus?: () => void }> = function ({ 
                         </Typography>
                     ))
                 }
-            </Collapse>
+            </Box>
         </Box>
     ) : null;
+
+    // ── Analyst-condition input collapse ─────────────────────────────
+    // The Analyst condition nudges the participant toward the agent's
+    // suggestions: the chat input is hidden by default behind a small
+    // "Ask your own question" toggle row. The box is forced open whenever
+    // hiding it would strand state the user must see or act on — an active
+    // clarification pause (its panel lives inside the input card), a run in
+    // progress (the working overlay), or a non-empty draft/attachments.
+    const isAnalystCondition = (config.studyCondition ?? 'default') === 'analyst';
+    const inputForcedOpen = !!pendingClarification
+        || isChatFormulating
+        || chatPrompt.trim().length > 0
+        || attachedImages.length > 0
+        || attachedFiles.length > 0;
+    const showInputBox = !isAnalystCondition || inputBoxOpen || inputForcedOpen;
+
+    // Toggle row styled after the suggestion strip's header so the two
+    // collapse affordances read as the same pattern.
+    const inputToggleRow = isAnalystCondition && !inputForcedOpen ? (
+        <Tooltip title={t(showInputBox ? 'chartRec.hideAskInput' : 'chartRec.showAskInput', { defaultValue: showInputBox ? 'Hide the input box' : 'Show the input box' })}>
+            <Box
+                onClick={() => {
+                    setInputBoxOpen(open => {
+                        if (!open) requestAnimationFrame(() => chatInputRef.current?.focus());
+                        return !open;
+                    });
+                }}
+                sx={{
+                    display: 'flex', alignItems: 'center', gap: 0.5,
+                    alignSelf: 'flex-start',
+                    mx: 1, my: 2.5, mb: showInputBox ? 0 : 0.75,
+                    px: 1, py: '6px', borderRadius: '6px',
+                    cursor: 'pointer', userSelect: 'none',
+                    color: 'text.secondary',
+                    transition: 'background-color 0.15s, color 0.15s',
+                    '&:hover': { color: 'text.primary', backgroundColor: alpha(theme.palette.text.primary, 0.06) },
+                }}
+            >
+                <EditOutlinedIcon sx={{ fontSize: 14, color: theme.palette.primary.main }} />
+                <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'inherit', lineHeight: 1 }}>
+                    {t('chartRec.askYourOwnQuestion', { defaultValue: 'Ask your own question' })}
+                </Typography>
+                <ExpandMoreIcon sx={{
+                    fontSize: 14, color: 'text.disabled',
+                    transform: showInputBox ? 'none' : 'rotate(-90deg)',
+                    transition: 'transform 0.15s',
+                }} />
+            </Box>
+        </Tooltip>
+    ) : null;
+
+    // ── Resting-size report ──────────────────────────────────────────
+    // The box is at rest when nothing forces it larger than its idle size:
+    // no clarification/run/draft (inputForcedOpen), no starter spinner in
+    // place of the chips, and — in the Analyst condition — the input still
+    // folded behind its toggle row.  The layout key separates the genuinely
+    // different resting sizes (strip present/absent, input card vs. toggle
+    // row) so DataThread can tell a real layout change from noise.
+    const atRestingSize = !inputForcedOpen && !starterLoading
+        && (!isAnalystCondition || !inputBoxOpen);
+    const restingLayoutKey = [
+        showGettingStarted ? 'strip' : 'no-strip',
+        showInputBox ? 'input' : 'toggle',
+    ].join('|');
+    useEffect(() => {
+        onRestingChange?.(atRestingSize, restingLayoutKey);
+    }, [atRestingSize, restingLayoutKey, onRestingChange]);
 
     return (
         <Box>
             {gettingStartedBlock}
+            {inputToggleRow}
             {/* The input box */}
-            {inputBox}
+            <Collapse in={showInputBox} timeout={200}>
+                {inputBox}
+            </Collapse>
         </Box>
     );
 };

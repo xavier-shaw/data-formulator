@@ -149,7 +149,7 @@ const AgentPauseShell: FC<AgentPauseShellProps> = ({
                         gap: '6px', minWidth: 0,
                     }}>
                         <Typography sx={{
-                            fontSize: 10, fontWeight: 600,
+                            fontSize: 12, fontWeight: 600,
                             color: theme.palette.text.disabled,
                             textTransform: 'uppercase',
                             letterSpacing: '0.06em', flexShrink: 0,
@@ -158,7 +158,7 @@ const AgentPauseShell: FC<AgentPauseShellProps> = ({
                         </Typography>
                         {minimizedPreview && (
                             <Typography sx={{
-                                fontSize: 11,
+                                fontSize: 13,
                                 color: theme.palette.text.secondary,
                                 fontStyle: 'italic',
                                 overflow: 'hidden', textOverflow: 'ellipsis',
@@ -170,7 +170,7 @@ const AgentPauseShell: FC<AgentPauseShellProps> = ({
                     </Box>
                 ) : (
                     <Typography sx={{
-                        fontSize: 11, fontWeight: 600,
+                        fontSize: 13, fontWeight: 600,
                         color: theme.palette.text.primary,
                         textTransform: 'uppercase',
                         letterSpacing: '0.06em', flex: 1,
@@ -355,7 +355,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
     // Shared muted standard-input chrome for all freeform fields.
     const freeTextSx = {
         '& .MuiInput-root': {
-            fontSize: 11,
+            fontSize: 13,
             color: theme.palette.text.secondary,
             '&:before': { borderBottomColor: alpha(theme.palette.text.primary, 0.1) },
             '&:hover:not(.Mui-disabled):before': { borderBottomColor: alpha(theme.palette.text.primary, 0.25) },
@@ -364,7 +364,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
         '& .MuiInput-input::placeholder': {
             color: theme.palette.text.disabled,
             opacity: 0.7,
-            fontSize: 11,
+            fontSize: 13,
         },
     } as const;
 
@@ -526,7 +526,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                             overflowY: 'auto',
                             pr: '4px',
                         }}>
-                            <Typography component="div" sx={{ fontSize: 12, color: theme.palette.text.primary, lineHeight: 1.5 }}>
+                            <Typography component="div" sx={{ fontSize: 14, color: theme.palette.text.primary, lineHeight: 1.5 }}>
                                 {!isExplain && questions.length > 1 && (
                                     <>
                                         {t('chartRec.clarificationQuestionLabel', { index: questionIndex + 1 })}{' '}
@@ -546,7 +546,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                                     <>
                                         {isExplain && (
                                             <Typography sx={{
-                                                fontSize: 10,
+                                                fontSize: 12,
                                                 color: theme.palette.text.disabled,
                                                 fontStyle: 'italic',
                                                 mt: '2px',
@@ -579,7 +579,7 @@ export const ClarificationPanel: FC<ClarificationPanelProps> = ({
                                                                 border: `1px solid ${isSelected ? alpha(accentColor, 0.6) : alpha(theme.palette.text.primary, 0.12)}`,
                                                                 backgroundColor: isSelected ? alpha(accentColor, 0.12) : theme.palette.background.paper,
                                                                 cursor: 'pointer',
-                                                                fontSize: 11,
+                                                                fontSize: 13,
                                                                 fontWeight: isSelected ? 600 : 400,
                                                                 display: 'block',
                                                                 width: '100%',
@@ -724,7 +724,7 @@ export const DelegatePanel: FC<DelegatePanelProps> = ({
                         overflowY: 'auto',
                     }}>
                         <Typography component="div" sx={{
-                            fontSize: 12,
+                            fontSize: 14,
                             color: theme.palette.text.primary,
                             lineHeight: 1.5,
                         }}>
@@ -734,7 +734,7 @@ export const DelegatePanel: FC<DelegatePanelProps> = ({
                 )}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <Typography sx={{
-                        fontSize: 10,
+                        fontSize: 12,
                         color: theme.palette.text.disabled,
                         fontStyle: 'italic',
                     }}>
@@ -759,7 +759,7 @@ export const DelegatePanel: FC<DelegatePanelProps> = ({
                                         border: `1px solid ${alpha(theme.palette.text.primary, 0.12)}`,
                                         backgroundColor: theme.palette.background.paper,
                                         cursor: 'pointer',
-                                        fontSize: 11,
+                                        fontSize: 13,
                                         fontWeight: 400,
                                         display: 'inline-flex',
                                         alignItems: 'center',
@@ -832,7 +832,7 @@ export const ExplanationPanel: FC<ExplanationPanelProps> = ({ content, onCancel 
                 maxHeight: 'clamp(120px, 32vh, 360px)',
                 overflowY: 'auto',
                 pb: '8px', pl: '20px', pr: '8px',
-                fontSize: 12,
+                fontSize: 14,
             }}>
                 <CompactMarkdown content={content} color={theme.palette.text.primary} />
             </Box>

@@ -38,7 +38,7 @@ const material = (): ProvenanceMaterial => ({
 });
 
 describe('ProvenanceStep', () => {
-    it('asks for the next chart, reveals the truth, then moves on', () => {
+    it('asks for the next chart, then commits the pick with one confirm', () => {
         const onDone = vi.fn();
         render(<ProvenanceStep material={material()} onDone={onDone} />);
 
@@ -49,14 +49,13 @@ describe('ProvenanceStep', () => {
         const confirm = screen.getByRole('button', { name: 'Confirm' });
         expect(confirm).toBeDisabled();
 
-        // A wrong pick still reveals the real next chart …
+        // ONE confirm commits the pick and ends the run — the participant is
+        // told nothing, as in part 4.
         fireEvent.click(screen.getByText('chart d'));
         expect(confirm).toBeEnabled();
         fireEvent.click(confirm);
-        expect(screen.getByText(/outlined in green/)).toBeInTheDocument();
-
-        // … and the same button moves on; the run ends after the only item.
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+        expect(screen.queryByText(/outlined in green/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/that is the chart you made next/i)).not.toBeInTheDocument();
 
         expect(onDone).toHaveBeenCalledTimes(1);
         const answer = onDone.mock.calls[0][0];
@@ -78,8 +77,19 @@ describe('ProvenanceStep', () => {
         render(<ProvenanceStep material={material()} onDone={onDone} />);
         fireEvent.click(screen.getByText('chart c'));
         fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-        expect(screen.getByText(/that is the chart you made next/i)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
         expect(onDone.mock.calls[0][0].score).toEqual({ correct: 1, total: 1 });
+    });
+
+    it('keeps the true next chart for the researcher\'s eye only', () => {
+        render(<ProvenanceStep material={material()} onDone={vi.fn()} />);
+
+        // Nothing marks the answer until the toggle is pressed.
+        const eye = screen.getByRole('button', { name: 'Show the chart that came next' });
+        const answerCard = () => screen.getByText('chart c').closest('button')!;
+        expect(answerCard()).not.toHaveStyle({ borderColor: 'rgb(46, 125, 50)' });
+
+        fireEvent.click(eye);
+        expect(screen.getByRole('button', { name: 'Hide the chart that came next' })).toBeInTheDocument();
+        expect(answerCard()).toHaveStyle({ borderColor: 'rgb(46, 125, 50)' });
     });
 });

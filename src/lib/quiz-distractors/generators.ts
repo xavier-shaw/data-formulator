@@ -42,7 +42,7 @@ import {
 } from './extract';
 import { SpecEdit, EDIT_COSTS, markTransitionCost } from './distance';
 import {
-    DataDim, MESSAGE_OPS, FLOORS, resolveRoles, messageMetrics,
+    DataDim, MESSAGE_OPS, resolveRoles, messageMetrics,
     sortedAxis, preserveSortedProfile, takeawaySignature,
 } from './messageOps';
 import { vlAdaptChart } from '../agents-chart';
@@ -361,8 +361,8 @@ function opPreference(chart: SessionChart): string[] {
  * already passed its operator's gate AND its floor (the message really
  * changed), and carries a story signature for the same-story dedupe.
  *
- * Must run inside `withSeededRandom`: the stochastic operators (decorrelate,
- * shuffle, equalize) draw from Math.random.
+ * Must run inside `withSeededRandom`: the stochastic operators (unlink,
+ * shuffle, flatten) draw from Math.random.
  */
 export function generateDataCandidates(chart: SessionChart): DistractorCandidate[] {
     const roles = resolveRoles(chart);
@@ -371,13 +371,12 @@ export function generateDataCandidates(chart: SessionChart): DistractorCandidate
     const origSignature = takeawaySignature(chart, roles, chart.rows);
     const out: DistractorCandidate[] = [];
 
-    const order = opPreference(chart);
-    const ops = order
-        .map(id => MESSAGE_OPS.find(o => o.id === id))
-        .filter((o): o is typeof MESSAGE_OPS[number] => !!o);
-
-    for (const op of ops) {
-        if (op.gate(chart, roles)) continue;
+    for (const id of opPreference(chart)) {
+        // One id names one message attack, not one mechanic: several entries
+        // can share the id, one per data type. The first entry whose gate
+        // accepts this chart is the mechanic the id means here.
+        const op = MESSAGE_OPS.filter(o => o.id === id).find(o => !o.gate(chart, roles));
+        if (!op) continue;
         const applied = op.apply(chart, roles, Math.random);
         if (!applied) continue;
 
@@ -390,9 +389,7 @@ export function generateDataCandidates(chart: SessionChart): DistractorCandidate
             note += '; put back into the original sorted order';
         }
 
-        const metrics = messageMetrics(chart, roles, rows);
-        const floor = FLOORS[op.id];
-        if (floor && !floor.test(metrics)) continue;
+        if (op.floor && !op.floor.test(messageMetrics(chart, roles, rows))) continue;
 
         const signature = takeawaySignature(chart, roles, rows);
         if (signature === origSignature) continue;

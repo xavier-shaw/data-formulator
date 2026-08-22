@@ -45,34 +45,37 @@ export const CURATED: Record<string, CuratedEntry> = {
     // rank swap and the gap-scaling pair dropped from the data axis.
     'Bar Chart': {
         visual: ['Lollipop Chart', 'Bar Table', 'Pie Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
     'Lollipop Chart': {
         visual: ['Bar Chart', 'Bar Table', 'Pie Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
     'Bar Table': {
         visual: ['Bar Chart', 'Lollipop Chart', 'Pie Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
     // Message: the interaction. Review: Heatmap and Ranged Dot dropped;
-    // the one-group leader swap dropped.
+    // the one-group leader swap dropped. Scatter added (2026-08-19): points
+    // per category stay honest on a nominal x, where the orderedX gate
+    // rightly refuses the line.
     'Grouped Bar Chart': {
-        visual: ['Stacked Bar Chart', 'Line Chart'],
-        data: ['series-exchange', 'attenuate', 'equalize'],
+        visual: ['Stacked Bar Chart', 'Line Chart', 'Scatter Plot'],
+        data: ['exchange', 'shrink', 'flatten'],
     },
     // Message: the composition and the total ranking. Review: Streamgraph
-    // and Area dropped; a multi-line series added instead.
+    // and Area dropped; a multi-line series added instead. Scatter added
+    // (2026-08-19), same reason as Grouped Bar.
     'Stacked Bar Chart': {
-        visual: ['Grouped Bar Chart', 'Line Chart'],
-        data: ['series-exchange', 'reassign-reverse', 'equalize'],
+        visual: ['Grouped Bar Chart', 'Line Chart', 'Scatter Plot'],
+        data: ['exchange', 'reverse', 'flatten'],
     },
     // Message: which steps add, which remove, and the end level. Review:
-    // the deltas may also negate (gains become losses). A running-sum line
-    // is admitted by design but needs a derive — deferred.
+    // the deltas may also flip their signs (gains become losses). A
+    // running-sum line is admitted by design but needs a derive — deferred.
     'Waterfall Chart': {
         visual: ['Bar Chart'],
-        data: ['reassign-rotate', 'negate'],
+        data: ['move', 'reverse'],
     },
 
     // ── Lines & Areas ────────────────────────────────────────────────────
@@ -80,22 +83,22 @@ export const CURATED: Record<string, CuratedEntry> = {
     // ordered axis). Review: Bump dropped as a target; detrend dropped.
     'Line Chart': {
         visual: ['Area Chart', 'Bar Chart', 'Scatter Plot'],
-        data: ['reassign-reverse', 'reassign-rotate', 'attenuate', 'polarize'],
+        data: ['reverse', 'move', 'shrink', 'amplify'],
     },
     'Area Chart': {
         visual: ['Line Chart', 'Bar Chart', 'Scatter Plot'],
-        data: ['reassign-reverse', 'reassign-rotate', 'attenuate', 'polarize'],
+        data: ['reverse', 'move', 'shrink', 'amplify'],
     },
     // Message: who is above whom, and where they overtake.
     'Bump Chart': {
         visual: ['Line Chart'],
-        data: ['reassign-reverse', 'reassign-rotate', 'shuffle'],
+        data: ['reverse', 'move', 'shuffle'],
     },
     // Message: the width of the whole flow and the growth of each band.
     // Review: the unstacked multi-line added.
     'Streamgraph': {
         visual: ['Area Chart', 'Stacked Bar Chart', 'Line Chart'],
-        data: ['series-exchange', 'reassign-rotate', 'attenuate', 'equalize'],
+        data: ['exchange', 'move', 'shrink', 'flatten'],
     },
 
     // ── Points ───────────────────────────────────────────────────────────
@@ -105,48 +108,49 @@ export const CURATED: Record<string, CuratedEntry> = {
     // but needs a same-fields exemption — deferred.
     'Scatter Plot': {
         visual: ['Heatmap'],
-        data: ['antitone', 'decorrelate', 'attenuate-relation', 'polarize-relation'],
+        data: ['reverse', 'shuffle', 'shrink', 'amplify'],
     },
     'Regression': {
         visual: ['Heatmap'],
-        data: ['antitone', 'decorrelate', 'attenuate-relation', 'polarize-relation'],
+        data: ['reverse', 'shuffle', 'shrink', 'amplify'],
     },
     // Message: the gap between the two conditions, per category. Review:
     // Stacked Bar and Strip/Scatter added; Lollipop dropped. Rank swap
     // replaced by shuffle (2026-08-18: a swap moves only two values).
     'Ranged Dot Plot': {
         visual: ['Grouped Bar Chart', 'Stacked Bar Chart', 'Strip Plot', 'Scatter Plot'],
-        data: ['series-exchange', 'shuffle', 'attenuate'],
+        data: ['exchange', 'shuffle', 'shrink'],
     },
     // Message: the density and the outliers, with no aggregation. Review:
     // Scatter dropped (reads the same); category swap dropped.
     'Strip Plot': {
         visual: ['Boxplot'],
-        data: ['shuffle', 'reassign-reverse'],
+        data: ['shuffle', 'reverse'],
     },
 
     // ── Distributions ────────────────────────────────────────────────────
-    // Message: the modes, the skew, the center, and the spread. The
-    // raw-value operators (dist-*) work on the one quantitative field.
+    // Message: the modes, the skew, the center, and the spread. The ids
+    // resolve to the raw-value mechanics here (move the center, mirror the
+    // skew, widen the spread) — a distribution has no label axis.
     'Histogram': {
         visual: ['Density Plot', 'Strip Plot', 'Boxplot'],
-        data: ['dist-shift', 'dist-mirror', 'dist-widen'],
+        data: ['move', 'reverse', 'shrink'],
     },
     'Density Plot': {
         visual: ['Histogram', 'Strip Plot', 'Boxplot'],
-        data: ['dist-shift', 'dist-mirror', 'dist-widen'],
+        data: ['move', 'reverse', 'shrink'],
     },
     // Message: the medians, the spreads, and the outliers, per category.
     // Review: grouped Density added; the top-median swap dropped.
     'Boxplot': {
         visual: ['Strip Plot', 'Density Plot'],
-        data: ['reassign-reverse', 'shuffle'],
+        data: ['reverse', 'shuffle'],
     },
     // Message: the asymmetry between the two sides, and the bulges.
     // Review: the two side profiles as lines added.
     'Pyramid Chart': {
         visual: ['Grouped Bar Chart', 'Line Chart'],
-        data: ['series-exchange', 'reassign-rotate', 'attenuate'],
+        data: ['exchange', 'move', 'shrink'],
     },
     // Reviewed lures (close-only line; open/close reversal; big-day
     // rotation) all need machinery that does not exist yet, so the type
@@ -158,17 +162,17 @@ export const CURATED: Record<string, CuratedEntry> = {
     // dominant-share swap and the majority flip dropped.
     'Pie Chart': {
         visual: ['Rose Chart', 'Bar Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
     'Rose Chart': {
         visual: ['Pie Chart', 'Bar Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
-    // Message: the shape of the profile. Review: spike swap and flatten
-    // dropped.
+    // Message: the shape of the profile. Review: the spike swap and the
+    // v3 profile-flatten lure dropped.
     'Radar Chart': {
         visual: ['Rose Chart', 'Bar Chart'],
-        data: ['reassign-reverse', 'equalize'],
+        data: ['reverse', 'flatten'],
     },
 
     // ── Tables & Maps ────────────────────────────────────────────────────
@@ -176,7 +180,7 @@ export const CURATED: Record<string, CuratedEntry> = {
     // Stacked Bar added; the hotspot swap dropped from the data axis.
     'Heatmap': {
         visual: ['Grouped Bar Chart', 'Scatter Plot', 'Stacked Bar Chart'],
-        data: ['reassign-reverse', 'attenuate', 'shuffle'],
+        data: ['reverse', 'shrink', 'shuffle'],
     },
     // Message: the spatial pattern. Review: the basemap swap dropped —
     // the regions become bar categories instead. Rank swap replaced by
@@ -184,11 +188,11 @@ export const CURATED: Record<string, CuratedEntry> = {
     // the whole pattern, and the hotspot with it).
     'US Map': {
         visual: ['Bar Chart'],
-        data: ['shuffle', 'reassign-reverse', 'equalize'],
+        data: ['shuffle', 'reverse', 'flatten'],
     },
     'World Map': {
         visual: ['Bar Chart'],
-        data: ['shuffle', 'reassign-reverse', 'equalize'],
+        data: ['shuffle', 'reverse', 'flatten'],
     },
     // One collapsed number has no look-alike space.
     'KPI Card': { visual: [], data: [] },
